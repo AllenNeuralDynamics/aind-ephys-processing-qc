@@ -1,6 +1,7 @@
 import pathlib
 import spikeinterface as si
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
 import json
@@ -11,7 +12,7 @@ from aind_qcportal_schema.metric_value import CheckboxMetric
 DATA_PATH = pathlib.Path('/data')
 RESULTS_PATH = pathlib.Path('/results')
 
-def probe_unit_yield_qc(probe_analyzer: si.SortingAnalyzer, probe_experiment_name: str, output_path: pathlib.Path) -> QCMetric:
+def get_probe_unit_yield_qc(probe_analyzer: si.SortingAnalyzer, probe_experiment_name: str, output_path: pathlib.Path) -> QCMetric:
     number_of_units = probe_analyzer.get_num_units()
 
     decoder_label = probe_analyzer.sorting.get_property('decoder_label')
@@ -41,12 +42,21 @@ def probe_unit_yield_qc(probe_analyzer: si.SortingAnalyzer, probe_experiment_nam
 
     channel_indices = list(si.get_template_extremum_channel(probe_analyzer, mode='peak_to_peak', outputs='index').values())
     amplitudes = probe_analyzer.sorting.get_property('Amplitude')
+    df_amplitudes_channel_indices = pd.DataFrame({'amplitude': amplitudes, 'peak_channel': channel_indices})
+    mean_amplitude_by_peak_channel = df_amplitudes_channel_indices.groupby('peak_channel').mean()
+
     ax[3].scatter(amplitudes, channel_indices)
+    ax[3].plot(mean_amplitude_by_peak_channel['amplitude'], mean_amplitude_by_peak_channel.index.tolist(), c='r', alpha=0.7)
     ax[3].set_title('Unit Amplitude By Depth')
     ax[3].set_xlabel('uV')
     ax[3].set_ylabel('Channel Index')
 
+    firing_rate = quality_metrics['firing_rate'].tolist()
+    df_firing_rate_channel_indices = pd.DataFrame({'firing_rate': firing_rate, 'peak_channel': channel_indices})
+    mean_firing_rate_by_peak_channel = df_firing_rate_channel_indices.groupby('peak_channel').mean()
+
     ax[4].scatter(quality_metrics['firing_rate'], channel_indices)
+    ax[4].plot(mean_firing_rate_by_peak_channel['firing_rate'], mean_amplitude_by_peak_channel.index.tolist(), c='r', alpha=0.7)
     ax[4].set_title('Unit Firing Rate By Depth')
     ax[4].set_xlabel('spikes/s')
     ax[4].set_ylabel('Channel Index')
@@ -88,9 +98,10 @@ def probe_unit_yield_qc(probe_analyzer: si.SortingAnalyzer, probe_experiment_nam
                             reference=f'/{probe_experiment_name}/unit_yield.png', value=value_with_options,
                             status_history=[QCStatus(evaluator='aind-ephys-qc', timestamp=datetime.now(), status=Status.PENDING)])
     plt.close(fig)
+
     return yield_metric
 
-def probe_firing_rate_qc(probe_analyzer: si.SortingAnalyzer, probe_experiment_name: str, output_path: pathlib.Path, bin_interval: int=1) -> QCMetric:
+def get_probe_firing_rate_qc(probe_analyzer: si.SortingAnalyzer, probe_experiment_name: str, output_path: pathlib.Path, bin_interval: int=1) -> QCMetric:
     spike_vector = probe_analyzer.sorting.to_spike_vector()
     spike_times = np.array([spike[0] for spike in spike_vector]) / probe_analyzer.sampling_frequency
     spike_times_hist = np.histogram(spike_times, bins=np.arange(np.floor(np.min(spike_times)), np.ceil(np.max(spike_times)), bin_interval))
