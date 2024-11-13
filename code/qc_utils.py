@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 from datetime import datetime
 import matplotlib.pyplot as plt
-from scipy.signal import welch
+from scipy.signal import welch, spectrogram
 
 
 import spikeinterface as si
@@ -12,10 +12,8 @@ import spikeinterface.preprocessing as spre
 import spikeinterface.widgets as sw
 
 
-from aind_data_schema_models.modalities import Modality
 from aind_data_schema.core.processing import Processing
 from aind_data_schema.core.quality_control import QCMetric, QCStatus, QCEvaluation, Stage, Status
-from aind_qcportal_schema.metric_value import CheckboxMetric
 
 
 def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
@@ -42,7 +40,7 @@ def plot_raw_data(
     ----------
     recording : BaseRecording
         The recording object.
-    num_snippets_per_segment: ind, default: 3
+    num_snippets_per_segment: int, default: 3
         Number of snippets to plot for each segment.
     duration_s : float, default: 0.1
         The duration of each snippet.
@@ -80,12 +78,14 @@ def plot_raw_data(
                 with_colorbar=True,
                 ax=ax_hp
             )
-            if segment_index == 0:
-                ax_raw.set_title(f"seg{segment_index} @ {t_start}s\nRaw")
-                ax_hp.set_title(f"Highpass")
+            ax_raw.set_title(f"seg{segment_index} @ {t_start}s\nRaw")
+            ax_hp.set_title(f"Highpass")
             if snippet_index == 0:
                 ax_raw.set_ylabel("Depth ($\mu m$)")
                 ax_hp.set_ylabel("Depth ($\mu m$)")
+            else:
+                ax_raw.set_yticklabels([])
+                ax_hp.set_yticklabels([])
             if segment_index == num_segments - 1:
                 ax_hp.set_xlabel(f"Time (tot. {duration_s} s)")
             ax_raw.set_xticklabels([])
@@ -100,7 +100,6 @@ def plot_psd(
     recording: si.BaseRecording,
     recording_lfp: si.BaseRecording | None = None,
     num_snippets_per_segment: int=3,
-    num_depths_for_spectrograms: int=3,
     duration_s: float=1,
     freq_lf_filt: float=500.,
     freq_lf_viz: float=100.,
@@ -108,13 +107,13 @@ def plot_psd(
     freq_hf_viz: float=5000.
 ):
     """
-    Plot spectra and spectrograms.
+    Plot spectra for wide/band, low frequency, and high frequency.
 
     Parameters
     ----------
     recording : BaseRecording
         The recording object.
-    num_snippets_per_segment: ind, default: 3
+    num_snippets_per_segment: int, default: 3
         Number of snippets to plot for each segment.
     duration_s : float, default: 1
         The duration of each snippet.
@@ -136,7 +135,7 @@ def plot_psd(
     if recording_lfp is None:
         recording_lfp = recording
     recording_lfp = spre.bandpass_filter(recording, freq_min=0.1, freq_max=freq_lf_filt)
-    recording_lfp = spre.resample(recording_lfp, 1.5 * freq_lf_filt)
+    recording_lfp = spre.resample(recording_lfp, int(1.5 * freq_lf_filt))
     depths = recording.get_channel_locations()[:, 1]
 
     for segment_index in range(num_segments):
@@ -171,8 +170,8 @@ def plot_psd(
             power_channels_wide = []
             power_channels_lf = []
             
-            for i in range(traces_hf.shape[1]):
-                f_wide, p_wide = welch(traces_hf[:, i], fs=recording.sampling_frequency)
+            for i in range(traces_wide.shape[1]):
+                f_wide, p_wide = welch(traces_wide[:, i], fs=recording.sampling_frequency)
                 power_channels_wide.append(p_wide)
                 ax_psd.plot(f_wide, p_wide, color="gray", alpha=0.5)
 
@@ -197,13 +196,14 @@ def plot_psd(
             p_lfp_mean = np.mean(power_channels_lf, axis=0)
             ax_psd_lf.plot(f_lf, p_lfp_mean[lf_mask], color="k", lw=1)
 
-            extent_wide = [f.min(), f.max(), np.min(depths), np.max(depths)]
+            extent_wide = [f_wide.min(), f_wide.max(), np.min(depths), np.max(depths)]
             ax_psd_channels.imshow(
                 power_channels_wide,
                 extent=extent_wide,
                 aspect="auto",
                 cmap="inferno",
                 origin="lower",
+                norm="log"
             )
             extent_hf = [f_hf.min(), f_hf.max(), np.min(depths), np.max(depths)]
             ax_psd_hf_channels.imshow(
@@ -212,6 +212,7 @@ def plot_psd(
                 aspect="auto",
                 cmap="inferno",
                 origin="lower",
+                norm="log"
             )
             extent_lf = [f_lf.min(), f_lf.max(), np.min(depths), np.max(depths)]
             ax_psd_lf_channels.imshow(
@@ -220,11 +221,11 @@ def plot_psd(
                 aspect="auto",
                 cmap="inferno",
                 origin="lower",
+                norm="log"
             )
-            if segment_index == 0:
-                ax_psd.set_title(f"seg{segment_index} @ {t_start}s")
-                ax_psd_hf.set_title(f"seg{segment_index} @ {t_start}s")
-                ax_psd_lf.set_title(f"seg{segment_index} @ {t_start}s")
+            ax_psd.set_title(f"seg{segment_index} @ {t_start}s")
+            ax_psd_hf.set_title(f"seg{segment_index} @ {t_start}s")
+            ax_psd_lf.set_title(f"seg{segment_index} @ {t_start}s")
             if snippet_index == 0:
                 ax_psd.set_ylabel("Power ($\mu V^2/Hz$)")
                 ax_psd_hf.set_ylabel("Power ($\mu V^2/Hz$)")
@@ -234,9 +235,9 @@ def plot_psd(
                 ax_psd_hf_channels.set_ylabel("Depth ($\mu$ m)")
                 ax_psd_lf_channels.set_ylabel("Depth ($\mu$ m)")
             if segment_index == num_segments - 1:    
-                ax_psd.set_xlabel("Frequency (Hz)")
-                ax_psd_hf.set_xlabel("Frequency (Hz)")
-                ax_psd_lf.set_xlabel("Frequency (Hz)")
+                ax_psd_channels.set_xlabel("Frequency (Hz)")
+                ax_psd_hf_channels.set_xlabel("Frequency (Hz)")
+                ax_psd_lf_channels.set_xlabel("Frequency (Hz)")
 
             ax_psd.set_yscale("log")
             ax_psd_hf.set_yscale("log")
@@ -247,6 +248,77 @@ def plot_psd(
     fig_psd_lf.subplots_adjust(wspace=0.3, hspace=0.3)
 
     return fig_psd, fig_psd_hf, fig_psd_lf
+
+
+def plot_spectrograms(
+    recording: si.BaseRecording,
+    num_locations_across_probe: int=3,
+    num_snippets_per_segment: int=3,
+    duration_s: float=1,
+):
+    """
+    Plot spectrograms at discrete depths and time points.
+
+    Parameters
+    ----------
+    recording : BaseRecording
+        The recording object.
+    num_locations_across_probe: int, default: 3
+        Number of depths to plot spectrograms.
+    num_snippets_per_segment: int, default: 3
+        Number of snippets to plot for each segment.
+    duration_s : float, default: 1
+        The duration of each snippet.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        Figure object containing the spectrograms at different depths and times.
+    """
+    num_segments = recording.get_num_segments()
+    fig_spectrograms, axs_spectrograms = _get_fig_axs(num_segments * num_locations_across_probe, num_snippets_per_segment)
+
+    depths = recording.get_channel_locations()[:, 1]
+    selected_depths = np.round(np.linspace(np.min(depths), np.max(depths), num_locations_across_probe + 2)[1:-1])[::-1]
+    selected_channels = recording.channel_ids[[np.argmin(sel_depth - depths) for sel_depth in selected_depths]]
+
+    for segment_index in range(num_segments):
+        # evenly distribute t_starts across segments
+        times = recording.get_times(segment_index=segment_index)
+        t_starts = np.round(np.linspace(times[0], times[-1], num_snippets_per_segment + 2)[1:-1], 1)
+        for snippet_index, t_start in enumerate(t_starts):
+            start_frame = recording.time_to_sample_index(t_start, segment_index=segment_index)
+            end_frame = recording.time_to_sample_index(t_start + duration_s, segment_index=segment_index)
+            traces = recording.get_traces(
+                start_frame=start_frame,
+                end_frame=end_frame,
+                segment_index=segment_index,
+                return_scaled=True
+            )
+            f, t, sxx = spectrogram(traces, fs=recording.sampling_frequency, nperseg=1024, axis=0)
+
+            for channel_index, channel in enumerate(selected_channels):
+                ax = axs_spectrograms[segment_index * num_locations_across_probe + channel_index, snippet_index]
+
+                extent = [t.min(), t.max(), f.min(), f.max()]
+                ax.imshow(
+                    sxx[:, channel_index],
+                    extent=extent,
+                    aspect="auto",
+                    cmap="inferno",
+                    origin="lower",
+                    norm="log"
+                )
+                if channel_index == 0:
+                    ax.set_title(f"seg{segment_index} @ {t_start}s")
+                if snippet_index == 0:
+                    ax.set_ylabel(f"{channel} @ {int(selected_depths[channel_index])} $\mu m$\nFrequency (Hz)")
+                if segment_index == num_segments - 1 and channel_index == len(selected_channels) - 1:
+                    ax.set_xlabel("Time (s)")
+
+    fig_spectrograms.subplots_adjust(wspace=0.3, hspace=0.3)
+
+    return fig_spectrograms
 
 
 def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None):
@@ -302,7 +374,7 @@ def probe_noise_levels_qc(
     metrics = {}
     recording_fig_folder = output_qc_path / recording_name
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
-    sp = QCStatus(evaluator="", status=Status.PENDING, timestamp=t)
+    sp = QCStatus(evaluator="", status=Status.PENDING, timestamp=datetime.now())
 
     raw_traces_value = {}
     if visualization_output is not None:
@@ -317,12 +389,11 @@ def probe_noise_levels_qc(
     if relative_to is not None:
         raw_traces_path = raw_traces_path.relative_to(relative_to)
     raw_data_metric = QCMetric(
-        name=f'{recording_name} raw data',
-        value={},
+        name=f'Raw data {recording_name} ',
         description=f'Evaluation of {recording_name} raw data',
-        reference=str(raw_traces_path),
         value=raw_traces_value,
-        status_history=sp
+        reference=str(raw_traces_path),
+        status_history=[sp]
     )
     metrics["Raw Data"] = [raw_data_metric]
 
@@ -342,11 +413,11 @@ def probe_noise_levels_qc(
         psd_lf_path = psd_lf_path.relative_to(relative_to)
 
     psd_wide_metric = QCMetric(
-        name=f'{recording_name} PSD - Wide Band',
+        name=f'PSD (Wide Band) {recording_name} ',
         description=f'Evaluation of {recording_name} wide-band power spectrum density',
         reference=str(psd_wide_path),
         value=None,
-        status_history=sp
+        status_history=[sp]
     )
 
     hf_value_with_flags = {
@@ -357,11 +428,11 @@ def probe_noise_levels_qc(
     }
 
     psd_hf_metric = QCMetric(
-        name=f'{recording_name} PSD - High Frequency',
+        name=f'PSD (High Frequency) {recording_name} ',
         description=f'Evaluation of {recording_name} high-frequency power spectrum density',
         reference=str(psd_hf_path),
         value=hf_value_with_flags,
-        status_history=sp
+        status_history=[sp]
 
     )
     lf_value_with_flags = {
@@ -372,15 +443,28 @@ def probe_noise_levels_qc(
     }
 
     psd_lf_metric = QCMetric(
-        name=f'{recording_name} PSD - Low Frequency',
+        name=f'PSD (Low Frequency) {recording_name}',
         description=f'Evaluation of {recording_name} low-frequency power spectrum density',
         reference=str(psd_hf_path),
         value=lf_value_with_flags,
-        status_history=sp
+        status_history=[sp]
     )
     metrics["PSD"] = [psd_wide_metric, psd_hf_metric, psd_lf_metric]
 
-    # TODO: Spectrograms
+    print("Plotting spectrograms")
+    fig_spectrograms = plot_spectrograms(recording)
+    spectrograms_path = recording_fig_folder / "spectrograms.png"
+    fig_spectrograms.savefig(spectrograms_path, dpi=300)
+    if relative_to is not None:
+        spectrograms_path = spectrograms_path.relative_to(relative_to)
+    spectrogram_metric = QCMetric(
+        name=f'Spectrograms {recording_name}',
+        description=f'Evaluation of {recording_name} Spectrograms',
+        reference=str(spectrograms_path),
+        value=None,
+        status_history=[sp]
+    )
+    metrics["Spectrograms"] = [spectrogram_metric]
 
     print("Plotting RMS")
     fig_rms = plot_rms_by_depth(recording, recording_preprocessed)
@@ -389,11 +473,11 @@ def probe_noise_levels_qc(
     if relative_to is not None:
         rms_path = rms_path.relative_to(relative_to)
     rms_metric = QCMetric(
-        name=f'{recording_name} RMS',
+        name=f'RMS {recording_name}',
         description=f'Evaluation of {recording_name} RMS',
         reference=str(rms_path),
         value=None,
-        status_history=sp
+        status_history=[sp]
     )
     metrics["Noise"] = [rms_metric]
 
@@ -402,22 +486,25 @@ def probe_noise_levels_qc(
         try:
             data_processes = processing.processing_pipeline.data_processes
             for data_process in data_processes:
+                params = data_process.parameters.model_dump()
+                outputs = data_process.outputs.model_dump()
                 if data_process.name == "Ephys preprocessing" and \
-                   data_process.parameters.get("recording_name") == recording_name:
-                    channel_labels = data_process.output.get("channel_labels")
-                    channel_labels_value = {
-                        "good": np.sum(channel_labels == "good"),
-                        "noise": np.sum(channel_labels == "noise"),
-                        "dead": np.sum(channel_labels == "dead"),
-                        "out": np.sum(channel_labels == "out"),
-                    }
-                    channel_labels_metric = QCMetric(
-                        name=f'{recording_name} RMS',
-                        description=f'Evaluation of {recording_name} bad_channel detection',
-                        value=channel_labels_value,
-                        status_history=sp
-                    )
-                    metrics["Noise"].append(channel_labels_metric)
+                  params.get("recording_name") is not None and params.get("recording_name") == recording_name:
+                    channel_labels = np.array(outputs.get("channel_labels"))
+                    if channel_labels is not None:
+                        channel_labels_value = {
+                            "good": int(np.sum(channel_labels == "good")),
+                            "noise": int(np.sum(channel_labels == "noise")),
+                            "dead": int(np.sum(channel_labels == "dead")),
+                            "out": int(np.sum(channel_labels == "out")),
+                        }
+                        channel_labels_metric = QCMetric(
+                            name=f'Bad channel detection {recording_name}',
+                            description=f'Evaluation of {recording_name} bad channel detection',
+                            value=channel_labels_value,
+                            status_history=[sp]
+                        )
+                        metrics["Noise"].append(channel_labels_metric)
         except:
             print(f"Failed to load bad channel labels for {recording_name}")
 

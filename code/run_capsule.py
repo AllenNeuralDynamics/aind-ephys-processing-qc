@@ -6,7 +6,10 @@ import json
 
 import spikeinterface as si
 
-from aind_data_schema.core.quality_control import QualityControl
+from aind_data_schema.core.processing import Processing
+from aind_data_schema_models.modalities import Modality
+from aind_data_schema.core.quality_control import QualityControl, QCEvaluation, Stage
+
 
 from qc_utils import probe_noise_levels_qc
 
@@ -121,9 +124,9 @@ if __name__ == "__main__":
                         job_dict["recording_lfp_dict"] = recording_lfp_one.to_dict(recursive=True, relative_to=data_folder)
 
     processing_json_file = ecephys_sorted_folder / "processing.json"
-    processing_metadata = None
+    processing = None
     if processing_json_file.is_file():
-        processing_metadata = load_processing_metadata(processing_json_file)
+        processing = load_processing_metadata(processing_json_file)
 
     visualization_json_file = ecephys_sorted_folder / "visualization_output.json"
     visualization_output = None
