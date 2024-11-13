@@ -48,7 +48,6 @@ def load_processing_metadata(processing_json):
     return Processing(**processing_dict)
 
 
-
 if __name__ == "__main__":
     # pipeline mode VS capsule mode
     ecephys_folders = [
@@ -72,12 +71,10 @@ if __name__ == "__main__":
         ecephys_sorted_folder = data_folder
     else:
         ecephys_sorted_folder = None
-    
+
     quality_control_fig_folder = results_folder / "quality_control"
 
-    job_json_files = [
-        p for p in data_folder.iterdir() if p.suffix == ".json" and "job" in p.name
-    ]
+    job_json_files = [p for p in data_folder.iterdir() if p.suffix == ".json" and "job" in p.name]
     job_dicts = []
     for job_json_file in job_json_files:
         with open(job_json_file) as f:
@@ -97,7 +94,7 @@ if __name__ == "__main__":
                 continue
             job_dict = {}
             job_dict["session_name"] = ecephys_folder.name
-            recording_base_name = stream_name[:stream_name.find(".zarr")]
+            recording_base_name = stream_name[: stream_name.find(".zarr")]
             recording = si.read_zarr(stream_folder)
             recording_lfp = None
             if "AP" in stream_name:
@@ -115,13 +112,17 @@ if __name__ == "__main__":
                         job_dict["recording_dict"] = recording_group.to_dict(recursive=True, relative_to=data_folder)
                         if recording_lfp is not None:
                             recording_lfp_group = recording_lfp_one.split_by("group")[group]
-                            job_dict["recording_lfp_dict"] = recording_lfp_group.to_dict(recursive=True, relative_to=data_folder)
+                            job_dict["recording_lfp_dict"] = recording_lfp_group.to_dict(
+                                recursive=True, relative_to=data_folder
+                            )
                         job_dicts.append(job_dict)
                 else:
                     job_dict["recording_name"] = f"{recording_base_name}_recording{segment_index+1}"
                     job_dict["recording_dict"] = recording_one.to_dict(recursive=True, relative_to=data_folder)
                     if recording_lfp is not None:
-                        job_dict["recording_lfp_dict"] = recording_lfp_one.to_dict(recursive=True, relative_to=data_folder)
+                        job_dict["recording_lfp_dict"] = recording_lfp_one.to_dict(
+                            recursive=True, relative_to=data_folder
+                        )
 
     processing_json_file = ecephys_sorted_folder / "processing.json"
     processing = None
@@ -148,8 +149,10 @@ if __name__ == "__main__":
         recording_preprocessed = None
         if ecephys_sorted_folder is not None:
             preprocessed_json_file = ecephys_sorted_folder / "preprocessed" / f"{recording_name}.json"
-            recording_preprocessed = load_preprocessed(preprocessed_json_file, session_name, ecephys_folder, data_folder)
-          
+            recording_preprocessed = load_preprocessed(
+                preprocessed_json_file, session_name, ecephys_folder, data_folder
+            )
+
         metrics = probe_noise_levels_qc(
             recording,
             recording_name,
@@ -158,7 +161,7 @@ if __name__ == "__main__":
             recording_lfp=recording_lfp,
             recording_preprocessed=recording_preprocessed,
             processing=processing,
-            visualization_output=visualization_output
+            visualization_output=visualization_output,
         )
         for evaluation_name, metric_value in metrics.items():
             if evaluation_name in all_metrics:
@@ -175,7 +178,7 @@ if __name__ == "__main__":
             stage=Stage.RAW,
             name=evaluation_name,
             description=evaluation_name,
-            metrics=metrics
+            metrics=metrics,
         )
         evaluations.append(evaluation)
 
