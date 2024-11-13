@@ -328,8 +328,8 @@ def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None
         ax_rms.plot(rms_pre, depths_pre, color="r", label="preprocessed")
         ax_rms.legend()
 
-    ax_rms.set_xlabel("RMS ( $\mu V$)")
-    ax_rms.set_ylabel("Depth ( $\mu m$)")
+    ax_rms.set_xlabel("RMS ($\mu V$)")
+    ax_rms.set_ylabel("Depth ($\mu m$)")
     ax_rms.spines[["right", "top"]].set_visible(False)
 
     return fig_rms
