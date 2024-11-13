@@ -1,0 +1,32 @@
+{
+	"version": 1,
+	"base_image": "codeocean/jupyterlab:3.6.1-miniconda4.12.0-python3.9-ubuntu20.04",
+	"options": {
+		"registry_host_arg": true,
+		"git_ask_pass": true
+	},
+	"installers": {
+		"pip": {
+			"packages": [
+				{
+					"name": "aind-data-schema",
+					"version": "1.1.1"
+				},
+				{
+					"name": "aind-qcportal-schema",
+					"version": "0.1.1"
+				},
+				{
+					"name": "spikeinterface[full,widgets]",
+					"version": "0.101.2"
+				},
+				{
+					"name": "wavpack-numcodecs",
+					"version": "0.2.1"
+				}
+			],
+			"options": {},
+			"pre_install_options": {}
+		}
+	}
+}
