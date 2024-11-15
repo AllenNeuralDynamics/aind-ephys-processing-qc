@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import json
+import numpy as np
 
 
 import spikeinterface as si
@@ -11,7 +12,7 @@ from aind_data_schema_models.modalities import Modality
 from aind_data_schema.core.quality_control import QualityControl, QCEvaluation, Stage
 
 
-from qc_utils import probe_noise_levels_qc
+from qc_utils import probe_raw_qc
 
 
 data_folder = Path("../data")
@@ -22,13 +23,21 @@ def load_preprocessed(preprocessed_json_file, session_name, ecephys_folder, data
     recording_preprocessed = None
     try:
         recording_preprocessed = si.load_extractor(preprocessed_json_file, base_folder=data_folder)
-    except:
-        # undo the remapping
-        json_str = json.dumps(json.load(preprocessed_json_file))
-        if ecephys_folder.name != session_name:
-            json_str_remapped = json_str.replace(session_name, ecephys_folder.name)
+    except Exception as e:
+        pass
+    if recording_preprocessed is None:
+        try:
+            json_str = json.dumps(json.load(open(preprocessed_json_file)))
+            if "ecephys_session" in json_str:
+                json_str_remapped = json_str.replace("ecephys_session", ecephys_folder.name)
+            elif ecephys_folder.name != session_name and session_name in json_str:
+                json_str_remapped = json_str.replace(session_name, ecephys_folder.name)
             recording_dict = json.loads(json_str_remapped)
             recording_preprocessed = si.load_extractor(recording_dict, base_folder=data_folder)
+        except:
+            pass
+    if recording_preprocessed is None:
+        print(f"Error loading preprocessed data...")
     return recording_preprocessed
 
 
@@ -83,6 +92,7 @@ if __name__ == "__main__":
     print(f"Found {len(job_dicts)} JSON job files")
 
     if len(job_dicts) == 0:
+        print("Parsing AIND-specific input data")
         # here we load the compressed recordings
         if (ecephys_folder / "ecephys").is_dir():
             ecephys_compressed_folder = ecephys_folder / "ecephys" / "ecephys_compressed"
@@ -106,6 +116,18 @@ if __name__ == "__main__":
                 if recording_lfp is not None:
                     recording_lfp_one = si.split_recording(recording_lfp)[segment_index]
                 recording_name = f"{recording_base_name}_recording{segment_index+1}"
+                # timestamps should be monotonically increasing, but we allow for small glitches
+                skip_times = False
+                for segment_index in range(recording.get_num_segments()):
+                    times = recording.get_times(segment_index=segment_index)
+                    times_diff = np.diff(times)
+                    num_negative_times = np.sum(times_diff < 0)
+
+                    if num_negative_times > 0:
+                        print(f"\t{recording_name} - Times not monotonically increasing.")
+                        skip_times = True
+                job_dict["skip_times"] = skip_times
+
                 if len(np.unique(recording_one.get_channel_groups())) > 1:
                     for group, recording_group in recording_one.split_by("group").items():
                         job_dict["recording_name"] = f"{recording_base_name}_recording{segment_index+1}_group{group}"
@@ -123,6 +145,8 @@ if __name__ == "__main__":
                         job_dict["recording_lfp_dict"] = recording_lfp_one.to_dict(
                             recursive=True, relative_to=data_folder
                         )
+                    job_dicts.append(job_dict)
+        print(f"Found {len(job_dicts)} recordings")
 
     processing_json_file = ecephys_sorted_folder / "processing.json"
     processing = None
@@ -139,21 +163,28 @@ if __name__ == "__main__":
     all_metrics = {}
     for job_dict in job_dicts:
         recording = si.load_extractor(job_dict["recording_dict"], base_folder=data_folder)
+        if job_dict["skip_times"]:
+            recording.reset_times()
         recording_lfp_dict = job_dict.get("recording_lfp_dict")
         if recording_lfp_dict is not None:
             recording_lfp = si.load_extractor(recording_lfp_dict, base_folder=data_folder)
+            if job_dict["skip_times"]:
+                recording_lfp.reset_times()
         else:
             recording_lfp = None
         recording_name = job_dict["recording_name"]
         session_name = job_dict["session_name"]
+        print(f"Recording {recording_name}")
         recording_preprocessed = None
         if ecephys_sorted_folder is not None:
             preprocessed_json_file = ecephys_sorted_folder / "preprocessed" / f"{recording_name}.json"
             recording_preprocessed = load_preprocessed(
                 preprocessed_json_file, session_name, ecephys_folder, data_folder
             )
+            if job_dict["skip_times"]:
+                recording_preprocessed.reset_times()
 
-        metrics = probe_noise_levels_qc(
+        metrics = probe_raw_qc(
             recording,
             recording_name,
             quality_control_fig_folder,
@@ -163,11 +194,11 @@ if __name__ == "__main__":
             processing=processing,
             visualization_output=visualization_output,
         )
-        for evaluation_name, metric_value in metrics.items():
+        for evaluation_name, metric_list in metrics.items():
             if evaluation_name in all_metrics:
-                all_metrics[evaluation_name].append(metric_value)
+                all_metrics[evaluation_name].extend(metric_list)
             else:
-                all_metrics[evaluation_name] = metric_value
+                all_metrics[evaluation_name] = metric_list
 
     # generate evaluations
     evaluations = []
