@@ -5,6 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
 import json
+from scipy.interpolate import make_interp_spline, BSpline
 
 from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status
 from aind_qcportal_schema.metric_value import CheckboxMetric
@@ -22,13 +23,14 @@ def get_probe_unit_yield_qc(probe_analyzer: si.SortingAnalyzer, probe_experiment
     assert (number_of_mua_units + number_of_noise_units + number_of_sua_units) == number_of_units, f'Total number of units {number_of_units} does not equal {number_of_sua_units} sua units + {number_of_mua_units} mua units + {number_of_noise_units} noise units'
 
     default_qc = probe_analyzer.sorting.get_property('default_qc')
-    fraction_of_good_units = default_qc[default_qc == True].shape[0] / number_of_units
+    number_of_good_units = default_qc[default_qc == True].shape[0]
 
     quality_metrics = probe_analyzer.get_extension('quality_metrics').get_data()
 
     fig, ax = plt.subplots(1, 5, figsize=(15,6))
 
-    ax[0].hist(quality_metrics['isi_violations_ratio'], bins=20, density=True)
+    ax[0].hist(quality_metrics['isi_violations_ratio'], bins=20)
+    ax[0].set_xscale('log')
     ax[0].set_title(f'ISI Violations')
     ax[0].set_xlabel('violation rate')
 
@@ -40,22 +42,34 @@ def get_probe_unit_yield_qc(probe_analyzer: si.SortingAnalyzer, probe_experiment
     ax[2].set_title(f'Presence Ratio')
     ax[2].set_xlabel('fraction of session')
 
-    channel_indices = list(si.get_template_extremum_channel(probe_analyzer, mode='peak_to_peak', outputs='index').values())
+    channel_indices = np.array(list(si.get_template_extremum_channel(probe_analyzer, mode='peak_to_peak', outputs='index').values()))
     amplitudes = probe_analyzer.sorting.get_property('Amplitude')
     df_amplitudes_channel_indices = pd.DataFrame({'amplitude': amplitudes, 'peak_channel': channel_indices})
     mean_amplitude_by_peak_channel = df_amplitudes_channel_indices.groupby('peak_channel').mean()
 
-    ax[3].scatter(amplitudes, channel_indices)
-    ax[3].plot(mean_amplitude_by_peak_channel['amplitude'], mean_amplitude_by_peak_channel.index.tolist(), c='r', alpha=0.7)
+    colors = {'sua': 'blue', 'mua': 'green', 'noise': 'orange'}
+    for label in np.unique(decoder_label):
+        mask = decoder_label == label
+        ax[3].scatter(amplitudes[mask], channel_indices[mask], c=colors[label], label=label)
+
+    xnew = np.linspace(mean_amplitude_by_peak_channel.index.min(), mean_amplitude_by_peak_channel.index.max(), 50) 
+    spl = make_interp_spline(mean_amplitude_by_peak_channel.index.tolist(), mean_amplitude_by_peak_channel['amplitude'], k=3)  # type: BSpline
+    smoothed = spl(xnew)
+
+    ax[3].plot(smoothed, xnew, c='r', alpha=0.7)
     ax[3].set_title('Unit Amplitude By Depth')
     ax[3].set_xlabel('uV')
     ax[3].set_ylabel('Channel Index')
+    ax[3].legend()
 
-    firing_rate = quality_metrics['firing_rate'].tolist()
+    firing_rate = np.array(quality_metrics['firing_rate'].tolist())
     df_firing_rate_channel_indices = pd.DataFrame({'firing_rate': firing_rate, 'peak_channel': channel_indices})
     mean_firing_rate_by_peak_channel = df_firing_rate_channel_indices.groupby('peak_channel').mean()
 
-    ax[4].scatter(quality_metrics['firing_rate'], channel_indices)
+    for label in np.unique(decoder_label):
+        mask = decoder_label == label
+        ax[4].scatter(firing_rate[mask], channel_indices[mask], c=colors[label], label=label)
+
     ax[4].plot(mean_firing_rate_by_peak_channel['firing_rate'], mean_amplitude_by_peak_channel.index.tolist(), c='r', alpha=0.7)
     ax[4].set_title('Unit Firing Rate By Depth')
     ax[4].set_xlabel('spikes/s')
@@ -79,19 +93,20 @@ def get_probe_unit_yield_qc(probe_analyzer: si.SortingAnalyzer, probe_experiment
         timeseries_link = f'No timeseries link found for {probe_experiment_name}. Pipeline possibly errored'
         sorting_summary_link = f'No sorting summary link found for {probe_experiment_name}. Pipeline possibly errored'
 
-    metric_values = {'number_of_sua_units': number_of_sua_units, 'number_of_mua_units': number_of_mua_units, 'number_of_noise_units': number_of_noise_units,
-                    'fraction_of_units_passing_quality_metrics': fraction_of_good_units,
-                    'timeseries_visualization_link': timeseries_link,
+    metric_values = {'number_of_total_units': number_of_units, 
+                    'number_of_sua_units': number_of_sua_units, 'number_of_mua_units': number_of_mua_units, 'number_of_noise_units': number_of_noise_units,
+                    'number_of_units_passing_quality_metrics': number_of_good_units,
                     'sorting_summary_visualization_link': sorting_summary_link}
 
     value_with_options = {
         "unit quality metrics": metric_values,
-        "options": ["Good", "Suspicous"],
+        "options": ["Good", "Low Yied", "High Noise"],
         "status": [
             "Pass",
             "Fail",
+            "Fail"
         ],
-        "type": "dropdown"
+        "type": "checkbox"
     }
     # TODO: Update reference path
     yield_metric = QCMetric(name=f'{probe_experiment_name} unit metrics yield', description=f'Evaluation of {probe_experiment_name} unit metrics yield',
@@ -118,8 +133,8 @@ def get_probe_firing_rate_qc(probe_analyzer: si.SortingAnalyzer, probe_experimen
     # TODO: Update reference path
     firing_rate_metric = QCMetric(name=f'{probe_experiment_name} firing rate image', description=f'Evaluation of {probe_experiment_name} firing rate',
                         reference=f'/{probe_experiment_name}/firing_rate.png', 
-                        value=CheckboxMetric(value='Firing Rate Evaluation', options=['No problems detected', 'Seizure', 'Suspicious looking', 'Other issues'],
-                        status=[Status.PASS, Status.FAIL, Status.FAIL, Status.PENDING]),
+                        value=CheckboxMetric(value='Firing Rate Evaluation', options=['No problems detected', 'Seizure', 'Firing Rate Gap'],
+                        status=[Status.PASS, Status.FAIL, Status.FAIL]),
                         status_history=[QCStatus(evaluator='aind-ephys-qc', timestamp=datetime.now(), status=Status.PENDING)])
     
     return firing_rate_metric
