@@ -6,6 +6,19 @@ import numpy as np
 from aind_data_schema.core.quality_control import QualityControl, QCEvaluation, Stage
 from aind_data_schema_models.modalities import Modality
 
+def move_qc_plots(sorted_input_dir, qc_json):
+    """Take QC plots that already exist in the input and move them to the appropriate output folders, and add the new paths to the QC json"""
+
+    # for each probe, move plots
+
+
+def blah(sorted_asset_dir, output_path):
+    visualization_probe_dirs = utils.DATA_PATH.glob('*/visualization/*')
+    for probe_dir in visualization_probe_dirs:
+        probe_dir / 'drift_map.png'
+
+
+
 def get_unit_yield_evaluation(probe_analyzers: dict[str, si.SortingAnalyzer], output_path: pathlib.Path) -> QCEvaluation:
     probe_unit_yield_qc_metrics = []
     for probe_name in probe_analyzers:
