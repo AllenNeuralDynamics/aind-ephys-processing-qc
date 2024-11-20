@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 import numpy as np
+import pandas as pd
+import json
 from datetime import datetime
 import matplotlib.pyplot as plt
-from scipy.signal import welch, spectrogram
+from scipy.signal import welch, spectrogram, savgol_filter
 
 
 import spikeinterface as si
@@ -14,7 +16,10 @@ import spikeinterface.widgets as sw
 
 from aind_data_schema.core.processing import Processing
 from aind_data_schema.core.quality_control import QCMetric, QCStatus, QCEvaluation, Stage, Status
+from aind_qcportal_schema.metric_value import CheckboxMetric
 
+data_folder = Path("../data")
+results_folder = Path("../results")
 
 def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
     figsize = (subplot_figsize[0] * ncols, subplot_figsize[1] * nrows)
@@ -470,20 +475,17 @@ def get_probe_unit_yield_qc(probe_analyzer: si.SortingAnalyzer, probe_experiment
 
     channel_indices = np.array(list(si.get_template_extremum_channel(probe_analyzer, mode='peak_to_peak', outputs='index').values()))
     amplitudes = probe_analyzer.sorting.get_property('Amplitude')
-    amplitudes[amplitudes > 800] = 800
+    amplitudes[amplitudes > 5000] = 5000
     df_amplitudes_channel_indices = pd.DataFrame({'amplitude': amplitudes, 'peak_channel': channel_indices})
     mean_amplitude_by_peak_channel = df_amplitudes_channel_indices.groupby('peak_channel').mean()
 
     colors = {'sua': 'blue', 'mua': 'green', 'noise': 'orange'}
     for label in np.unique(decoder_label):
         mask = decoder_label == label
-        ax[3].scatter(amplitudes[mask], channel_indices[mask], c=colors[label], label=label)
+        ax[3].scatter(amplitudes[mask], channel_indices[mask], c=colors[label], label=label, alpha=0.4)
 
-    xnew = np.linspace(mean_amplitude_by_peak_channel.index.min(), mean_amplitude_by_peak_channel.index.max(), 100) 
-    spl = make_interp_spline(mean_amplitude_by_peak_channel.index.tolist(), mean_amplitude_by_peak_channel['amplitude'], k=3)  # type: BSpline
-    smoothed = spl(xnew)
-
-    #ax[3].plot(smoothed, xnew, c='r', alpha=0.7)
+    smoothed_amplitude = savgol_filter(mean_amplitude_by_peak_channel['amplitude'], 10, 2)
+    ax[3].plot(smoothed_amplitude, mean_amplitude_by_peak_channel.index.tolist(), c='r')
     ax[3].set_title('Unit Amplitude By Depth')
     ax[3].set_xlabel('uV')
     ax[3].set_ylabel('Channel Index')
@@ -496,18 +498,20 @@ def get_probe_unit_yield_qc(probe_analyzer: si.SortingAnalyzer, probe_experiment
 
     for label in np.unique(decoder_label):
         mask = decoder_label == label
-        ax[4].scatter(firing_rate[mask], channel_indices[mask], c=colors[label], label=label)
+        ax[4].scatter(firing_rate[mask], channel_indices[mask], c=colors[label], label=label, alpha=0.4)
 
-    ax[4].plot(mean_firing_rate_by_peak_channel['firing_rate'], mean_amplitude_by_peak_channel.index.tolist(), c='r', alpha=0.7)
+    smoothed_firing_rate = savgol_filter(mean_firing_rate_by_peak_channel['firing_rate'], 10, 2)
+    ax[4].plot(smoothed_firing_rate, mean_firing_rate_by_peak_channel.index.tolist(), c='r')
     ax[4].set_title('Unit Firing Rate By Depth')
     ax[4].set_xlabel('spikes/s')
     ax[4].set_ylabel('Channel Index')
+    ax[4].legend()
 
     fig.suptitle(f'{probe_experiment_name} Unit Metrics Yield')
     plt.tight_layout()
     fig.savefig(output_path / 'unit_yield.png')
 
-    visualization_json_path = tuple(DATA_PATH.glob('*/visualization_output.json'))
+    visualization_json_path = tuple(data_folder.glob('*/visualization_output.json'))
     if not visualization_json_path:
         raise FileNotFoundError('No visualization json found in sorting result')
 

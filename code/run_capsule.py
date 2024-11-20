@@ -12,13 +12,13 @@ from aind_data_schema.core.quality_control import QualityControl, QCEvaluation, 
 
 from qc_utils import probe_raw_qc, get_probe_firing_rate_qc, get_probe_unit_yield_qc
 
-data_folder = Path("/data")
-results_folder = Path("/results")
+data_folder = Path("../data")
+results_folder = Path("../results")
 
 def get_unit_yield_evaluation(probe_analyzers: dict[str, si.SortingAnalyzer], output_path: Path) -> QCEvaluation:
     probe_unit_yield_qc_metrics = []
     for probe_name in probe_analyzers:
-        probe_unit_yield_qc_metrics.append(utils.get_probe_unit_yield_qc(probe_analyzers[probe_name], probe_name, output_path / probe_name))
+        probe_unit_yield_qc_metrics.append(get_probe_unit_yield_qc(probe_analyzers[probe_name], probe_name, output_path / probe_name))
 
     return QCEvaluation(name='Unit Yield', description='Quality of unit yield', stage=Stage.PROCESSING, modality=Modality.from_abbreviation('ecephys'), notes='',
                         allow_failed_metrics=True, metrics=probe_unit_yield_qc_metrics)
@@ -27,7 +27,7 @@ def get_firing_rate_evaluation(probe_analyzers: dict[str, si.SortingAnalyzer], o
     probe_firing_rate_qc_metrics = []
 
     for probe_name in probe_analyzers:
-        probe_firing_rate_qc_metrics.append(utils.get_probe_firing_rate_qc(probe_analyzers[probe_name], probe_name, output_path / probe_name))
+        probe_firing_rate_qc_metrics.append(get_probe_firing_rate_qc(probe_analyzers[probe_name], probe_name, output_path / probe_name))
     
     return QCEvaluation(name='Interictal Events', description='Quality of firing rate across session', stage=Stage.PROCESSING,
                                 modality=Modality.from_abbreviation('ecephys'), notes='', allow_failed_metrics=True, metrics=probe_firing_rate_qc_metrics)
@@ -225,12 +225,15 @@ if __name__ == "__main__":
             metrics=metrics,
         )
         evaluations.append(evaluation)
-
-    probe_postprocessed_zarr_files = sorted(ecephys_sorted_folder.glob('*/postprocessed/*'))
+    
+    probe_postprocessed_zarr_files = sorted(tuple(ecephys_sorted_folder.glob('postprocessed/*')))
     probe_analyzers = {}
 
+    if not quality_control_fig_folder.exists():
+        quality_control_fig_folder.mkdir()
+
     for zarr_file in probe_postprocessed_zarr_files:
-        if not (quality_control_fig_folder / zarr_file.stem).exists(): # TODO: update path if needed
+        if not (quality_control_fig_folder / zarr_file.stem).exists():
             (quality_control_fig_folder / zarr_file.stem).mkdir()
 
         probe_analyzers[zarr_file.stem] = si.load_sorting_analyzer(zarr_file)
