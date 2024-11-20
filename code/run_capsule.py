@@ -59,6 +59,10 @@ def load_processing_metadata(processing_json):
     return Processing(**processing_dict)
 
 
+def move_drift_plots(input_dir, quality_control_fig_folder):
+    pass
+
+
 if __name__ == "__main__":
     # pipeline mode VS capsule mode
     ecephys_folders = [
