@@ -17,12 +17,12 @@
 					"version": "0.1.1"
 				},
 				{
-					"name": "matplotlib",
-					"version": "3.9.2"
+					"name": "spikeinterface[full,widgets]",
+					"version": "0.101.2"
 				},
 				{
-					"name": "spikeinterface[full]",
-					"version": "0.101.2"
+					"name": "wavpack-numcodecs",
+					"version": "0.2.1"
 				}
 			],
 			"options": {},
