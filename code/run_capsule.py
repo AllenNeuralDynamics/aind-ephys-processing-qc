@@ -141,13 +141,13 @@ if __name__ == "__main__":
             recording_preprocessed = load_preprocessed_recording(
                 preprocessed_json_file, session_name, ecephys_folder, data_folder
             )
-            if job_dict["skip_times"]:
+            if recording_preprocessed is not None and job_dict["skip_times"]:
                 recording_preprocessed.reset_times()
 
             postprocessed_folder_zarr = ecephys_sorted_folder / "postprocessed" / f"{recording_name}.zarr"
             postprocessed_folder = ecephys_sorted_folder / "postprocessed" / recording_name
             if postprocessed_folder_zarr.is_dir():
-                sorting_analyzer = si.load_sorting_analyzer(postprocessed_folder)
+                sorting_analyzer = si.load_sorting_analyzer(postprocessed_folder_zarr)
             elif postprocessed_folder.is_dir():
                 # this is for legacy waveform extractor folders
                 sorting_analyzer = si.load_waveforms(postprocessed_folder, output="SortingAnalyzer")
@@ -207,7 +207,7 @@ if __name__ == "__main__":
     for evaluation_name, metrics in all_metrics_processed.items():
         evaluation = QCEvaluation(
             modality=Modality.ECEPHYS,
-            stage=Stage.PROCESSED,
+            stage=Stage.PROCESSING,
             name=evaluation_name,
             description=evaluation_name,
             metrics=metrics,

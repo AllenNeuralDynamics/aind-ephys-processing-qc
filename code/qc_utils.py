@@ -191,8 +191,12 @@ def plot_psd(
 
     if recording_lfp is None:
         recording_lfp = recording
-    recording_lfp = spre.bandpass_filter(recording, freq_min=0.1, freq_max=freq_lf_filt)
-    recording_lfp = spre.resample(recording_lfp, int(1.5 * freq_lf_filt))
+        recording_lfp = spre.bandpass_filter(recording, freq_min=0.1, freq_max=freq_lf_filt)
+        target_lfp_sampling = int(1.5 * freq_lf_filt)
+        decimate_factor = int(recording.sampling_frequency / target_lfp_sampling)
+        recording_lfp = spre.decimate(recording_lfp, decimate_factor)
+    else:
+        recording_lfp = spre.bandpass_filter(recording_lfp, freq_min=0.1, freq_max=freq_lf_filt)
     depths = recording.get_channel_locations()[:, 1]
 
     for segment_index in range(num_segments):
@@ -577,7 +581,7 @@ def generate_units_qc(
     channel_indices = np.array(
         list(si.get_template_extremum_channel(sorting_analyzer, mode="peak_to_peak", outputs="index").values())
     )
-    amplitudes = si.get_template_extremum_amplitude(sorting_analyzer, mode="peak_to_peak").values()
+    amplitudes = np.array(list(si.get_template_extremum_amplitude(sorting_analyzer, mode="peak_to_peak").values()))
     amplitudes[amplitudes > max_amplitude_for_visualization] = max_amplitude_for_visualization
     df_amplitudes_channel_indices = pd.DataFrame({"amplitude": amplitudes, "peak_channel": channel_indices})
     mean_amplitude_by_peak_channel = df_amplitudes_channel_indices.groupby("peak_channel").mean()
@@ -642,7 +646,7 @@ def generate_units_qc(
     yield_metric = QCMetric(
         name=f"Unit Metrics Yield - {recording_name}",
         description=f"Evaluation of {recording_name} unit metrics yield",
-        reference=unit_yield_path,
+        reference=str(unit_yield_path),
         value=value_with_options,
         status_history=[status_pending],
     )
@@ -650,7 +654,7 @@ def generate_units_qc(
 
     print("Generating FIRING RATE metric")
     num_segments = sorting_analyzer.get_num_segments()
-    fig_fr, ax_fr = _get_fig_axs(num_segments, 1, subplot_figsize=(5, 3))
+    fig_fr, axs_fr = _get_fig_axs(num_segments, 1, subplot_figsize=(5, 3))
     spike_vector = sorting_analyzer.sorting.to_spike_vector()
     if sorting_analyzer.has_recording():
         recording = sorting_analyzer.recording
@@ -666,16 +670,16 @@ def generate_units_qc(
         else:
             spike_times = spike_vector_segment["sample_index"] / sorting_analyzer.sampling_frequency
 
-        duration = sorting_analyzer.get_duration(segment_index=segment_index)
-        num_bins = duration / bin_duration_hist_s
+        duration = sorting_analyzer.get_num_samples(segment_index=segment_index) / sorting_analyzer.sampling_frequency
+        num_bins = int(np.ceil(duration / bin_duration_hist_s))
 
         spike_times_hist, bin_edges = np.histogram(spike_times, bins=num_bins)
         bin_centers = bin_edges[:-1] + bin_duration_hist_s / 2
-        ax_fr[segment_index].plot(bin_centers, spike_times_hist)
+        axs_fr[segment_index, 0].plot(bin_centers, spike_times_hist)
 
-        ax_fr.set_title(f"Population firing rate")
-        ax_fr.set_xlabel("Time (s)")
-        ax_fr.set_ylabel("Firing rate (Hz)")
+        axs_fr[segment_index, 0].set_title(f"Population firing rate")
+        axs_fr[segment_index, 0].set_xlabel("Time (s)")
+        axs_fr[segment_index, 0].set_ylabel("Firing rate (Hz)")
 
     fig_fr.suptitle("Firing Rate")
     fig_fr.tight_layout()
@@ -693,7 +697,7 @@ def generate_units_qc(
     firing_rate_metric = QCMetric(
         name=f"Firing rate - {recording_name}",
         description=f"Evaluation of {recording_name} firing rate",
-        reference=firing_rate_path,
+        reference=str(firing_rate_path),
         value=value_with_options,
         status_history=[status_pending],
     )
