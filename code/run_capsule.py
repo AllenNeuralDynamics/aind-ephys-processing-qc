@@ -3,18 +3,16 @@
 from pathlib import Path
 import json
 import numpy as np
-
-        probe_analyzers[zarr_file.stem] = si.load_sorting_analyzer(zarr_file)
-        pass
-
 import spikeinterface as si
+import spikeinterface.widgets as sw
+import shutil
 
 from aind_data_schema.core.processing import Processing
 from aind_data_schema_models.modalities import Modality
 from aind_data_schema.core.quality_control import QualityControl, QCEvaluation, Stage
 
 
-from qc_utils import probe_raw_qc
+from qc_utils import probe_raw_qc, plot_displacement, make_drift_map
 
 
 data_folder = Path("../data")
@@ -59,10 +57,6 @@ def load_processing_metadata(processing_json):
     return Processing(**processing_dict)
 
 
-def move_drift_plots(input_dir, quality_control_fig_folder):
-    pass
-
-
 if __name__ == "__main__":
     # pipeline mode VS capsule mode
     ecephys_folders = [
@@ -86,8 +80,6 @@ if __name__ == "__main__":
         ecephys_sorted_folder = data_folder
     else:
         ecephys_sorted_folder = None
-
-    quality_control_fig_folder = results_folder / "quality_control"
 
     job_json_files = [p for p in data_folder.iterdir() if p.suffix == ".json" and "job" in p.name]
     job_dicts = []
@@ -113,6 +105,7 @@ if __name__ == "__main__":
             recording_base_name = stream_name[: stream_name.find(".zarr")]
             recording = si.read_zarr(stream_folder)
             recording_lfp = None
+
             if "AP" in stream_name:
                 lfp_stream_path = Path(str(stream_folder).replace("AP", "LFP"))
                 if lfp_stream_path.is_dir():
@@ -190,6 +183,12 @@ if __name__ == "__main__":
             if job_dict["skip_times"]:
                 recording_preprocessed.reset_times()
 
+        quality_control_fig_folder = results_folder / "quality_control"
+        motion_dir = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
+        probe_qc_dir = quality_control_fig_folder / recording_name
+        probe_qc_dir.mkdir(parents=True, exist_ok=True)
+        max_displacement, cumulative_drift = make_drift_map(recording, motion_dir, probe_qc_dir)
+        
         metrics = probe_raw_qc(
             recording,
             recording_name,

@@ -438,3 +438,71 @@ def probe_raw_qc(
             print(f"Failed to load bad channel labels for {recording_name}")
 
     return metrics
+
+
+def plot_displacement(motion_folder, quality_control_fig_folder):
+    for probe_motion_dir in motion_folder.iterdir():
+        probe_qc_dir = quality_control_fig_folder/probe_motion_dir.name
+
+        # open displacement array
+        displacement_arr = np.load(probe_motion_dir/'motion/displacement_seg0.npy')
+
+        # calculate max displacement
+        displacement = np.max(np.sum(displacement_arr, axis=0))
+        print('displacement for probe:',displacement)
+
+        # save displacement plot
+        fig, ax = plt.subplots()
+        ax.imshow(displacement_arr.transpose(), aspect='auto')
+        fig.savefig(probe_qc_dir/'displacement.png')
+
+
+
+def make_drift_map(recording, probe_motion_dir, plot_out_dir):
+    # open displacement arrays
+    displacement_arr = np.load(probe_motion_dir/'motion/displacement_seg0.npy')
+    spatial_bins = np.load(probe_motion_dir/'motion'/'spatial_bins_um.npy')
+    peaks_to_plot = np.load(probe_motion_dir / 'peaks.npy')
+    peak_locations_to_plot = np.load(probe_motion_dir / 'peak_locations.npy')
+
+    # calculate cumulative_drift and max displacement
+    cumulative_drift = np.max(np.sum(displacement_arr, axis=0))
+    max_displacement = np.max(displacement_arr)
+
+    fig_drift, axs_drift = plt.subplots(
+        ncols=recording.get_num_segments(), figsize=(10,10)
+    )
+    y_locs = recording.get_channel_locations()[:, 1]
+    depth_lim = [np.min(y_locs), np.max(y_locs)]
+    sampling_frequency = recording.sampling_frequency
+    depth_lim = [np.min(y_locs), np.max(y_locs)]
+
+    for segment_index in range(recording.get_num_segments()):
+        if recording.get_num_segments() == 1:
+            ax_drift = axs_drift
+        else:
+            ax_drift = axs_drift[segment_index]
+
+        _ = sw.plot_drift_raster_map(
+            sorting_analyzer=None,
+            peaks=peaks_to_plot,
+            peak_locations=peak_locations_to_plot,
+            recording=recording,
+            sampling_frequency=sampling_frequency,
+            segment_index=segment_index,
+            depth_lim=depth_lim,
+            clim=(-200, 0),
+            cmap="Greys_r",
+            scatter_decimate=30,
+            alpha=0.15,
+            ax=ax_drift,
+        )
+        ax_drift.spines["top"].set_visible(False)
+        ax_drift.spines["right"].set_visible(False)
+
+    axs_displacement = axs_drift.twinx()
+    displacement_traces = np.array([displacement+spatial_bins[i] for i, displacement in enumerate(displacement_arr.transpose())])
+    axs_displacement.plot(displacement_traces.transpose(), color='red', alpha=0.5)
+
+    fig_drift.savefig(plot_out_dir / "drift_map.png", dpi=300)
+    return max_displacement, cumulative_drift
