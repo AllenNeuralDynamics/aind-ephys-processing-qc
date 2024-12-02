@@ -1,4 +1,5 @@
 /data/
+.codeocean/datasets.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

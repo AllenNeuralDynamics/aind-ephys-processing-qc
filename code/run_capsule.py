@@ -11,50 +11,10 @@ from aind_data_schema.core.processing import Processing
 from aind_data_schema_models.modalities import Modality
 from aind_data_schema.core.quality_control import QualityControl, QCEvaluation, Stage
 
-
-from qc_utils import probe_raw_qc, plot_displacement, make_drift_map
-
+from qc_utils import generate_raw_qc, generate_units_qc, load_preprocessed_recording, load_processing_metadata, generate_drift_qc
 
 data_folder = Path("../data")
 results_folder = Path("../results")
-
-
-def load_preprocessed(preprocessed_json_file, session_name, ecephys_folder, data_folder):
-    recording_preprocessed = None
-    try:
-        recording_preprocessed = si.load_extractor(preprocessed_json_file, base_folder=data_folder)
-    except Exception as e:
-        pass
-    if recording_preprocessed is None:
-        try:
-            json_str = json.dumps(json.load(open(preprocessed_json_file)))
-            if "ecephys_session" in json_str:
-                json_str_remapped = json_str.replace("ecephys_session", ecephys_folder.name)
-            elif ecephys_folder.name != session_name and session_name in json_str:
-                json_str_remapped = json_str.replace(session_name, ecephys_folder.name)
-            recording_dict = json.loads(json_str_remapped)
-            recording_preprocessed = si.load_extractor(recording_dict, base_folder=data_folder)
-        except:
-            pass
-    if recording_preprocessed is None:
-        print(f"Error loading preprocessed data...")
-    return recording_preprocessed
-
-
-def load_processing_metadata(processing_json):
-    with open(processing_json) as f:
-        processing_dict = json.load(f)
-    processing_dict.pop("schema_version")
-    data_processes = processing_dict["processing_pipeline"]["data_processes"]
-    new_data_processes = []
-    for dp in data_processes:
-        if isinstance(dp, list):
-            for dpp in dp:
-                new_data_processes.append(dpp)
-        else:
-            new_data_processes.append(dp)
-    processing_dict["processing_pipeline"]["data_processes"] = new_data_processes
-    return Processing(**processing_dict)
 
 
 if __name__ == "__main__":
@@ -159,7 +119,8 @@ if __name__ == "__main__":
             visualization_output = json.load(f)
 
     # look for JSON files or loop through preprocessed
-    all_metrics = {}
+    all_metrics_raw = {}
+    all_metrics_processed = {}
     for job_dict in job_dicts:
         recording = si.load_extractor(job_dict["recording_dict"], base_folder=data_folder)
         if job_dict["skip_times"]:
@@ -177,19 +138,32 @@ if __name__ == "__main__":
         recording_preprocessed = None
         if ecephys_sorted_folder is not None:
             preprocessed_json_file = ecephys_sorted_folder / "preprocessed" / f"{recording_name}.json"
-            recording_preprocessed = load_preprocessed(
+            recording_preprocessed = load_preprocessed_recording(
                 preprocessed_json_file, session_name, ecephys_folder, data_folder
             )
-            if job_dict["skip_times"]:
+            if recording_preprocessed is not None and job_dict["skip_times"]:
                 recording_preprocessed.reset_times()
+
+            postprocessed_folder_zarr = ecephys_sorted_folder / "postprocessed" / f"{recording_name}.zarr"
+            postprocessed_folder = ecephys_sorted_folder / "postprocessed" / recording_name
+            if postprocessed_folder_zarr.is_dir():
+                sorting_analyzer = si.load_sorting_analyzer(postprocessed_folder_zarr)
+            elif postprocessed_folder.is_dir():
+                # this is for legacy waveform extractor folders
+                sorting_analyzer = si.load_waveforms(postprocessed_folder, output="SortingAnalyzer")
+            else:
+                sorting_analyzer = None
+
+            if recording_preprocessed is not None and sorting_analyzer is not None:
+                sorting_analyzer.set_temporary_recording(recording_preprocessed)
 
         quality_control_fig_folder = results_folder / "quality_control"
         motion_dir = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
         probe_qc_dir = quality_control_fig_folder / recording_name
         probe_qc_dir.mkdir(parents=True, exist_ok=True)
-        max_displacement, cumulative_drift = make_drift_map(recording, motion_dir, probe_qc_dir)
-        
-        metrics = probe_raw_qc(
+        drift_metric = generate_drift_qc(recording, motion_dir, probe_qc_dir)
+
+        metrics_raw = generate_raw_qc(
             recording,
             recording_name,
             quality_control_fig_folder,
@@ -199,22 +173,52 @@ if __name__ == "__main__":
             processing=processing,
             visualization_output=visualization_output,
         )
-        for evaluation_name, metric_list in metrics.items():
-            if evaluation_name in all_metrics:
-                all_metrics[evaluation_name].extend(metric_list)
+        for evaluation_name, metric_list in metrics_raw.items():
+            if evaluation_name in all_metrics_raw:
+                all_metrics_raw[evaluation_name].extend(metric_list)
             else:
-                all_metrics[evaluation_name] = metric_list
+                all_metrics_raw[evaluation_name] = metric_list
+        all_metric_raw['Drift'] = drift_metric
+
+        if sorting_analyzer is not None:
+            metrics_processed = generate_units_qc(
+                sorting_analyzer,
+                recording_name,
+                quality_control_fig_folder,
+                relative_to=results_folder,
+                visualization_output=visualization_output,
+            )
+        else:
+            print(f"No sorting analyzer found for {recording_name}")
+            metrics_processed = {}
+        for evaluation_name, metric_list in metrics_processed.items():
+            if evaluation_name in all_metrics_processed:
+                all_metrics_processed[evaluation_name].extend(metric_list)
+            else:
+                all_metrics_processed[evaluation_name] = metric_list
 
     # generate evaluations
     evaluations = []
 
-    for evaluation_name, metrics in all_metrics.items():
+    for evaluation_name, metrics in all_metrics_raw.items():
         evaluation = QCEvaluation(
             modality=Modality.ECEPHYS,
             stage=Stage.RAW,
             name=evaluation_name,
             description=evaluation_name,
             metrics=metrics,
+            allow_failed_metrics=True,
+        )
+        evaluations.append(evaluation)
+
+    for evaluation_name, metrics in all_metrics_processed.items():
+        evaluation = QCEvaluation(
+            modality=Modality.ECEPHYS,
+            stage=Stage.PROCESSING,
+            name=evaluation_name,
+            description=evaluation_name,
+            metrics=metrics,
+            allow_failed_metrics=True,
         )
         evaluations.append(evaluation)
 

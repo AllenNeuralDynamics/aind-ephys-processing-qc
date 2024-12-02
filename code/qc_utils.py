@@ -2,23 +2,62 @@ from __future__ import annotations
 
 from pathlib import Path
 import numpy as np
+import pandas as pd
+import json
 from datetime import datetime
 import matplotlib.pyplot as plt
-from scipy.signal import welch, spectrogram
+from scipy.signal import welch, savgol_filter
 
 
 import spikeinterface as si
 import spikeinterface.preprocessing as spre
 import spikeinterface.widgets as sw
 
-
 from aind_data_schema.core.processing import Processing
-from aind_data_schema.core.quality_control import QCMetric, QCStatus, QCEvaluation, Stage, Status
+from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status
+
+
+def load_preprocessed_recording(preprocessed_json_file, session_name, ecephys_folder, data_folder):
+    recording_preprocessed = None
+    try:
+        recording_preprocessed = si.load_extractor(preprocessed_json_file, base_folder=data_folder)
+    except Exception as e:
+        pass
+    if recording_preprocessed is None:
+        try:
+            json_str = json.dumps(json.load(open(preprocessed_json_file)))
+            if "ecephys_session" in json_str:
+                json_str_remapped = json_str.replace("ecephys_session", ecephys_folder.name)
+            elif ecephys_folder.name != session_name and session_name in json_str:
+                json_str_remapped = json_str.replace(session_name, ecephys_folder.name)
+            recording_dict = json.loads(json_str_remapped)
+            recording_preprocessed = si.load_extractor(recording_dict, base_folder=data_folder)
+        except:
+            pass
+    if recording_preprocessed is None:
+        print(f"Error loading preprocessed data...")
+    return recording_preprocessed
+
+
+def load_processing_metadata(processing_json):
+    with open(processing_json) as f:
+        processing_dict = json.load(f)
+    processing_dict.pop("schema_version")
+    data_processes = processing_dict["processing_pipeline"]["data_processes"]
+    new_data_processes = []
+    for dp in data_processes:
+        if isinstance(dp, list):
+            for dpp in dp:
+                new_data_processes.append(dpp)
+        else:
+            new_data_processes.append(dp)
+    processing_dict["processing_pipeline"]["data_processes"] = new_data_processes
+    return Processing(**processing_dict)
 
 
 def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
     figsize = (subplot_figsize[0] * ncols, subplot_figsize[1] * nrows)
-    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(subplot_figsize[0] * ncols, subplot_figsize[1] * nrows))
+    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
     if not isinstance(axs, np.ndarray):
         axs = np.array([axs])[:, None]
     elif nrows == 1:
@@ -34,7 +73,7 @@ def plot_raw_data(
     num_snippets_per_segment: int = 3,
     duration_s: float = 0.1,
     freq_ap: float = 300,
-    freq_lfp: float = 500
+    freq_lfp: float = 500,
 ):
     """
     Plot snippets of raw data as an image
@@ -79,7 +118,7 @@ def plot_raw_data(
                 return_scaled=True,
                 with_colorbar=True,
                 ax=ax_ap,
-                clim=(-50, 50)
+                clim=(-50, 50),
             )
             sw.plot_traces(
                 recording_lfp,
@@ -88,7 +127,7 @@ def plot_raw_data(
                 return_scaled=True,
                 with_colorbar=True,
                 ax=ax_lfp,
-                clim=(-300, 300)
+                clim=(-300, 300),
             )
             if np.mod(num_snippets_per_segment, 2) == 1:
                 if snippet_index == num_snippets_per_segment // 2:
@@ -152,8 +191,12 @@ def plot_psd(
 
     if recording_lfp is None:
         recording_lfp = recording
-    recording_lfp = spre.bandpass_filter(recording, freq_min=0.1, freq_max=freq_lf_filt)
-    recording_lfp = spre.resample(recording_lfp, int(1.5 * freq_lf_filt))
+        recording_lfp = spre.bandpass_filter(recording, freq_min=0.1, freq_max=freq_lf_filt)
+        target_lfp_sampling = int(1.5 * freq_lf_filt)
+        decimate_factor = int(recording.sampling_frequency / target_lfp_sampling)
+        recording_lfp = spre.decimate(recording_lfp, decimate_factor)
+    else:
+        recording_lfp = spre.bandpass_filter(recording_lfp, freq_min=0.1, freq_max=freq_lf_filt)
     depths = recording.get_channel_locations()[:, 1]
 
     for segment_index in range(num_segments):
@@ -256,7 +299,6 @@ def plot_psd(
     fig_psd_hf.suptitle("High-frequency")
     fig_psd_lf.suptitle("Low-frequency")
 
-
     return fig_psd, fig_psd_hf, fig_psd_lf
 
 
@@ -293,7 +335,7 @@ def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None
     return fig_rms
 
 
-def probe_raw_qc(
+def generate_raw_qc(
     recording: si.BaseRecording,
     recording_name: str,
     output_qc_path: Path,
@@ -303,14 +345,39 @@ def probe_raw_qc(
     processing: Processing | None = None,
     visualization_output: dict | None = None,
 ) -> dict[str : list[QCMetric]]:
+    """
+    Generate raw data quality control metrics for a given recording.
+
+    Parameters
+    ----------
+    recording : BaseRecording
+        The recording object.
+    recording_name : str
+        The name of the recording.
+    output_qc_path : Path
+        The output path for the quality control.
+    relative_to : Path | None, default: None
+        The relative path to the output path.
+    recording_lfp : BaseRecording | None, default: None
+        The LFP recording object.
+    recording_preprocessed : BaseRecording | None, default: None
+        The preprocessed recording object.
+    processing : Processing | None, default: None
+        The processing metadata object.
+    visualization_output : dict | None, default: None
+        The visualization output dict.
+
+    Returns
+    -------
+    dict[str : list[QCMetric]]:
+        The quality control metrics.
+    """
     metrics = {}
     recording_fig_folder = output_qc_path / recording_name
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
     now = datetime.now()
     status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
     status_pass = QCStatus(evaluator="", status=Status.PASS, timestamp=now)
-
-    raw_traces_value = {}
 
     print("Generating RAW DATA metrics")
     fig_raw = plot_raw_data(recording, recording_lfp)
@@ -440,34 +507,13 @@ def probe_raw_qc(
     return metrics
 
 
-def plot_displacement(motion_folder, quality_control_fig_folder):
-    for probe_motion_dir in motion_folder.iterdir():
-        probe_qc_dir = quality_control_fig_folder/probe_motion_dir.name
-
-        # open displacement array
-        displacement_arr = np.load(probe_motion_dir/'motion/displacement_seg0.npy')
-
-        # calculate max displacement
-        displacement = np.max(np.sum(displacement_arr, axis=0))
-        print('displacement for probe:',displacement)
-
-        # save displacement plot
-        fig, ax = plt.subplots()
-        ax.imshow(displacement_arr.transpose(), aspect='auto')
-        fig.savefig(probe_qc_dir/'displacement.png')
-
-
-
-def make_drift_map(recording, probe_motion_dir, plot_out_dir):
+def generate_drift_qc(recording, probe_motion_dir, plot_out_dir):
     # open displacement arrays
-    displacement_arr = np.load(probe_motion_dir/'motion/displacement_seg0.npy')
+    displacement_arr_path = probe_motion_dir/'motion/displacement_seg0.npy'
+    displacement_arr = np.load(displacement_arr_path)
     spatial_bins = np.load(probe_motion_dir/'motion'/'spatial_bins_um.npy')
     peaks_to_plot = np.load(probe_motion_dir / 'peaks.npy')
     peak_locations_to_plot = np.load(probe_motion_dir / 'peak_locations.npy')
-
-    # calculate cumulative_drift and max displacement
-    cumulative_drift = np.max(np.sum(displacement_arr, axis=0))
-    max_displacement = np.max(displacement_arr)
 
     fig_drift, axs_drift = plt.subplots(
         ncols=recording.get_num_segments(), figsize=(10,10)
@@ -503,6 +549,228 @@ def make_drift_map(recording, probe_motion_dir, plot_out_dir):
     axs_displacement = axs_drift.twinx()
     displacement_traces = np.array([displacement+spatial_bins[i] for i, displacement in enumerate(displacement_arr.transpose())])
     axs_displacement.plot(displacement_traces.transpose(), color='red', alpha=0.5)
-
     fig_drift.savefig(plot_out_dir / "drift_map.png", dpi=300)
-    return max_displacement, cumulative_drift
+
+    # calculate cumulative_drift and max displacement
+    cumulative_drift = np.max(np.sum(displacement_arr, axis=0))
+    max_displacement = np.max(displacement_arr)
+
+    # make metric for qc json
+    metric_values = {
+        "cumulative drift": cumulative_drift,
+        "maximum displacement": max_displacement,
+    }
+    value_with_options = {
+        "drift metrics": metric_values,
+        "value": "",
+        "options": ["Good", "High Drift"],
+        "status": ["Pass", "Fail"],
+        "type": "checkbox",
+    }
+    drift_metric = QCMetric(
+        name=f"Probe Drift - {recording_name}",
+        description=f"Evaluation of {recording_name} probe drift",
+        reference=str(displacement_arr_path),
+        value=value_with_options,
+        status_history=[status_pending],
+    )
+    return drift_metric
+
+
+def generate_units_qc(
+    sorting_analyzer: si.SortingAnalyzer,
+    recording_name: str,
+    output_qc_path: Path,
+    relative_to: Path | None = None,
+    visualization_output: dict | None = None,
+    max_amplitude_for_visualization: float = 5000,
+    max_firing_rate_for_visualization: float = 50,
+    bin_duration_hist_s: float = 1,
+) -> dict[str : list[QCMetric]]:
+    """
+    Generate unit yield metrics for a given sorting result.
+
+    Parameters
+    ----------
+    sorting_analyzer : SortingAnalyzer
+        The sorting analyzer.
+    recording_name : str
+        The name of the recording.
+    output_qc_path : Path
+        The output path for the quality control.
+    relative_to : Path | None, default: None
+        The relative path to the output path.
+    visualization_output : dict | None, default: None
+        The visualization output dict.
+    max_amplitude_for_visualization : float, default: 5000
+        The maximum amplitude used for plotting.
+    max_firing_rate_for_visualization : float, default: 50
+        The maximum firing rate used for plotting.
+    bin_duration_hist_s : float, default: 1
+        The duration of the histogram bins.
+
+    Returns
+    -------
+    dict[str : list[QCMetric]]:
+        The quality control metrics.
+    """
+    metrics = {}
+    recording_fig_folder = output_qc_path / recording_name
+    recording_fig_folder.mkdir(exist_ok=True, parents=True)
+    now = datetime.now()
+    status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
+
+    print("Generating UNIT YIELD metric")
+    number_of_units = sorting_analyzer.get_num_units()
+
+    decoder_label = sorting_analyzer.sorting.get_property("decoder_label")
+    number_of_sua_units = int(np.sum(decoder_label == "sua"))
+    number_of_mua_units = int(np.sum(decoder_label == "mua"))
+    number_of_noise_units = int(np.sum(decoder_label == "noise"))
+
+    default_qc = sorting_analyzer.sorting.get_property("default_qc")
+    number_of_good_units = int(np.sum(default_qc == True))
+
+    quality_metrics = sorting_analyzer.get_extension("quality_metrics").get_data()
+
+    fig_yield, ax_yield = plt.subplots(1, 5, figsize=(15, 6))
+
+    ax_yield[0].hist(quality_metrics["isi_violations_ratio"], bins=20)
+    ax_yield[0].set_xscale("log")
+    ax_yield[0].set_title(f"ISI Violations")
+    ax_yield[0].set_xlabel("violation rate")
+
+    ax_yield[1].hist(quality_metrics["amplitude_cutoff"], bins=20, density=True)
+    ax_yield[1].set_title(f"Amplitude Cutoff")
+    ax_yield[1].set_xlabel("frequency")
+
+    ax_yield[2].hist(quality_metrics["presence_ratio"], bins=20, density=True)
+    ax_yield[2].set_title(f"Presence Ratio")
+    ax_yield[2].set_xlabel("fraction of session")
+
+    channel_indices = np.array(
+        list(si.get_template_extremum_channel(sorting_analyzer, mode="peak_to_peak", outputs="index").values())
+    )
+    amplitudes = np.array(list(si.get_template_extremum_amplitude(sorting_analyzer, mode="peak_to_peak").values()))
+    amplitudes[amplitudes > max_amplitude_for_visualization] = max_amplitude_for_visualization
+    df_amplitudes_channel_indices = pd.DataFrame({"amplitude": amplitudes, "peak_channel": channel_indices})
+    mean_amplitude_by_peak_channel = df_amplitudes_channel_indices.groupby("peak_channel").mean()
+
+    colors = {"sua": "green", "mua": "orange", "noise": "red"}
+    for label in np.unique(decoder_label):
+        mask = decoder_label == label
+        ax_yield[3].scatter(amplitudes[mask], channel_indices[mask], c=colors[label], label=label, alpha=0.4)
+
+    smoothed_amplitude = savgol_filter(mean_amplitude_by_peak_channel["amplitude"], 10, 2)
+    ax_yield[3].plot(smoothed_amplitude, mean_amplitude_by_peak_channel.index.tolist(), c="r")
+    ax_yield[3].set_title("Unit Amplitude By Depth")
+    ax_yield[3].set_xlabel("uV")
+    ax_yield[3].set_ylabel("Channel Index")
+    ax_yield[3].legend()
+
+    firing_rate = np.array(quality_metrics["firing_rate"].tolist())
+    firing_rate[firing_rate > max_firing_rate_for_visualization] = max_firing_rate_for_visualization
+    df_firing_rate_channel_indices = pd.DataFrame({"firing_rate": firing_rate, "peak_channel": channel_indices})
+    mean_firing_rate_by_peak_channel = df_firing_rate_channel_indices.groupby("peak_channel").mean()
+
+    for label in np.unique(decoder_label):
+        mask = decoder_label == label
+        ax_yield[4].scatter(firing_rate[mask], channel_indices[mask], c=colors[label], label=label, alpha=0.4)
+
+    smoothed_firing_rate = savgol_filter(mean_firing_rate_by_peak_channel["firing_rate"], 10, 2)
+    ax_yield[4].plot(smoothed_firing_rate, mean_firing_rate_by_peak_channel.index.tolist(), c="r")
+    ax_yield[4].set_title("Unit Firing Rate By Depth")
+    ax_yield[4].set_xlabel("spikes/s")
+    ax_yield[4].set_ylabel("Channel Index")
+    ax_yield[4].legend()
+
+    fig_yield.suptitle("Unit Metrics Yield")
+    fig_yield.tight_layout()
+    unit_yield_path = recording_fig_folder / "unit_yield.png"
+    fig_yield.savefig(unit_yield_path, dpi=300)
+    if relative_to is not None:
+        unit_yield_path = unit_yield_path.relative_to(relative_to)
+
+    if visualization_output is not None:
+        if recording_name in visualization_output:
+            sorting_summary_link = visualization_output[recording_name].get("sorting_summary")
+        else:
+            sorting_summary_link = f"No sorting summary link found for {recording_name}."
+
+    metric_values = {
+        "number_of_total_units": number_of_units,
+        "number_of_sua_units": number_of_sua_units,
+        "number_of_mua_units": number_of_mua_units,
+        "number_of_noise_units": number_of_noise_units,
+        "number_of_units_passing_quality_metrics": number_of_good_units,
+        "sorting_summary_visualization_link": sorting_summary_link,
+    }
+
+    value_with_options = {
+        "unit quality metrics": metric_values,
+        "value": "",
+        "options": ["Good", "Low Yield", "High Noise"],
+        "status": ["Pass", "Fail", "Fail"],
+        "type": "checkbox",
+    }
+    yield_metric = QCMetric(
+        name=f"Unit Metrics Yield - {recording_name}",
+        description=f"Evaluation of {recording_name} unit metrics yield",
+        reference=str(unit_yield_path),
+        value=value_with_options,
+        status_history=[status_pending],
+    )
+    metrics["Unit Yield"] = [yield_metric]
+
+    print("Generating FIRING RATE metric")
+    num_segments = sorting_analyzer.get_num_segments()
+    fig_fr, axs_fr = _get_fig_axs(num_segments, 1, subplot_figsize=(5, 3))
+    spike_vector = sorting_analyzer.sorting.to_spike_vector()
+    if sorting_analyzer.has_recording():
+        recording = sorting_analyzer.recording
+    else:
+        recording = None
+
+    for segment_index in range(num_segments):
+        spike_vector_segment = spike_vector[spike_vector["segment_index"] == segment_index]
+
+        if recording is not None:
+            times = recording.get_times(segment_index=segment_index)
+            spike_times = times[spike_vector_segment["sample_index"]]
+        else:
+            spike_times = spike_vector_segment["sample_index"] / sorting_analyzer.sampling_frequency
+
+        duration = sorting_analyzer.get_num_samples(segment_index=segment_index) / sorting_analyzer.sampling_frequency
+        num_bins = int(np.ceil(duration / bin_duration_hist_s))
+
+        spike_times_hist, bin_edges = np.histogram(spike_times, bins=num_bins)
+        bin_centers = bin_edges[:-1] + bin_duration_hist_s / 2
+        axs_fr[segment_index, 0].plot(bin_centers, spike_times_hist)
+
+        axs_fr[segment_index, 0].set_title(f"Population firing rate")
+        axs_fr[segment_index, 0].set_xlabel("Time (s)")
+        axs_fr[segment_index, 0].set_ylabel("Firing rate (Hz)")
+
+    fig_fr.suptitle("Firing Rate")
+    fig_fr.tight_layout()
+    firing_rate_path = recording_fig_folder / "firing_rate.png"
+    fig_fr.savefig(firing_rate_path, dpi=300)
+    if relative_to is not None:
+        firing_rate_path = firing_rate_path.relative_to(relative_to)
+
+    value_with_options = {
+        "value": "",
+        "options": ["No problems detected", "Seizure", "Firing Rate Gap"],
+        "status": ["Pass", "Fail", "Fail"],
+        "type": "checkbox",
+    }
+    firing_rate_metric = QCMetric(
+        name=f"Firing rate - {recording_name}",
+        description=f"Evaluation of {recording_name} firing rate",
+        reference=str(firing_rate_path),
+        value=value_with_options,
+        status_history=[status_pending],
+    )
+    metrics["Firing Rate"] = [firing_rate_metric]
+
+    return metrics
