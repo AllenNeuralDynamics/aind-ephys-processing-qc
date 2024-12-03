@@ -507,13 +507,41 @@ def generate_raw_qc(
     return metrics
 
 
-def generate_drift_qc(recording, probe_motion_dir, plot_out_dir):
+def generate_drift_qc(
+    recording: si.BaseRecording,
+    recording_name: str,
+    motion_path: Path,
+    output_qc_path: Path
+) -> QCMetric:
+    """
+    Generate drift metrics for a given sorting result.
+
+    Parameters
+    ----------
+    recording : BaseRecording
+        The sorting analyzer.
+    recording_name : str
+        The name of the recording.
+    motion_path: Path,
+        The path of the recording's motion folder.
+    output_qc_path : Path
+        The output path for the quality control.
+
+    Returns
+    -------
+    QCMetric:
+        The quality control metric for drift.
+    """
+
+    probe_qc_dir = output_qc_path / recording_name
+    probe_qc_dir.mkdir(parents=True, exist_ok=True)
+
     # open displacement arrays
-    displacement_arr_path = probe_motion_dir/'motion/displacement_seg0.npy'
+    displacement_arr_path = motion_path/'motion/displacement_seg0.npy'
     displacement_arr = np.load(displacement_arr_path)
-    spatial_bins = np.load(probe_motion_dir/'motion'/'spatial_bins_um.npy')
-    peaks_to_plot = np.load(probe_motion_dir / 'peaks.npy')
-    peak_locations_to_plot = np.load(probe_motion_dir / 'peak_locations.npy')
+    spatial_bins = np.load(motion_path/'motion'/'spatial_bins_um.npy')
+    peaks_to_plot = np.load(motion_path / 'peaks.npy')
+    peak_locations_to_plot = np.load(motion_path / 'peak_locations.npy')
 
     fig_drift, axs_drift = plt.subplots(
         ncols=recording.get_num_segments(), figsize=(10,10)
@@ -549,7 +577,7 @@ def generate_drift_qc(recording, probe_motion_dir, plot_out_dir):
     axs_displacement = axs_drift.twinx()
     displacement_traces = np.array([displacement+spatial_bins[i] for i, displacement in enumerate(displacement_arr.transpose())])
     axs_displacement.plot(displacement_traces.transpose(), color='red', alpha=0.5)
-    fig_drift.savefig(plot_out_dir / "drift_map.png", dpi=300)
+    fig_drift.savefig(probe_qc_dir / "drift_map.png", dpi=300)
 
     # calculate cumulative_drift and max displacement
     cumulative_drift = np.max(np.sum(displacement_arr, axis=0))
@@ -570,10 +598,11 @@ def generate_drift_qc(recording, probe_motion_dir, plot_out_dir):
     drift_metric = QCMetric(
         name=f"Probe Drift - {recording_name}",
         description=f"Evaluation of {recording_name} probe drift",
-        reference=str(displacement_arr_path),
+        reference=str(probe_qc_dir / "drift_map.png"),
         value=value_with_options,
-        status_history=[status_pending],
+        status_history=[QCStatus(evaluator="", status=Status.PENDING, timestamp=datetime.now())],
     )
+
     return drift_metric
 
 

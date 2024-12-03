@@ -158,10 +158,13 @@ if __name__ == "__main__":
                 sorting_analyzer.set_temporary_recording(recording_preprocessed)
 
         quality_control_fig_folder = results_folder / "quality_control"
-        motion_dir = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
-        probe_qc_dir = quality_control_fig_folder / recording_name
-        probe_qc_dir.mkdir(parents=True, exist_ok=True)
-        drift_metric = generate_drift_qc(recording, motion_dir, probe_qc_dir)
+
+        motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
+        drift_metric = generate_drift_qc(recording, recording_name, motion_path, quality_control_fig_folder)
+        if 'Drift' not in all_metrics_raw:
+            all_metrics_raw['Drift'] = [drift_metric]
+        else:
+            all_metrics_raw['Drift'].append(drift_metric)
 
         metrics_raw = generate_raw_qc(
             recording,
@@ -178,7 +181,6 @@ if __name__ == "__main__":
                 all_metrics_raw[evaluation_name].extend(metric_list)
             else:
                 all_metrics_raw[evaluation_name] = metric_list
-        all_metric_raw['Drift'] = drift_metric
 
         if sorting_analyzer is not None:
             metrics_processed = generate_units_qc(
