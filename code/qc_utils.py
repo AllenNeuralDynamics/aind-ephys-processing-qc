@@ -507,6 +507,105 @@ def generate_raw_qc(
     return metrics
 
 
+def generate_drift_qc(
+    recording: si.BaseRecording,
+    recording_name: str,
+    motion_path: Path,
+    output_qc_path: Path
+) -> QCMetric:
+    """
+    Generate drift metrics for a given sorting result.
+
+    Parameters
+    ----------
+    recording : BaseRecording
+        The sorting analyzer.
+    recording_name : str
+        The name of the recording.
+    motion_path: Path,
+        The path of the recording's motion folder.
+    output_qc_path : Path
+        The output path for the quality control.
+
+    Returns
+    -------
+    QCMetric:
+        The quality control metric for drift.
+    """
+
+    probe_qc_dir = output_qc_path / recording_name
+    probe_qc_dir.mkdir(parents=True, exist_ok=True)
+
+    # open displacement arrays
+    displacement_arr_path = motion_path/'motion/displacement_seg0.npy'
+    displacement_arr = np.load(displacement_arr_path)
+    spatial_bins = np.load(motion_path/'motion'/'spatial_bins_um.npy')
+    peaks_to_plot = np.load(motion_path / 'peaks.npy')
+    peak_locations_to_plot = np.load(motion_path / 'peak_locations.npy')
+
+    fig_drift, axs_drift = plt.subplots(
+        ncols=recording.get_num_segments(), figsize=(10,10)
+    )
+    y_locs = recording.get_channel_locations()[:, 1]
+    depth_lim = [np.min(y_locs), np.max(y_locs)]
+    sampling_frequency = recording.sampling_frequency
+    depth_lim = [np.min(y_locs), np.max(y_locs)]
+
+    for segment_index in range(recording.get_num_segments()):
+        if recording.get_num_segments() == 1:
+            ax_drift = axs_drift
+        else:
+            ax_drift = axs_drift[segment_index]
+
+        _ = sw.plot_drift_raster_map(
+            sorting_analyzer=None,
+            peaks=peaks_to_plot,
+            peak_locations=peak_locations_to_plot,
+            recording=recording,
+            sampling_frequency=sampling_frequency,
+            segment_index=segment_index,
+            depth_lim=depth_lim,
+            clim=(-200, 0),
+            cmap="Greys_r",
+            scatter_decimate=30,
+            alpha=0.15,
+            ax=ax_drift,
+        )
+        ax_drift.spines["top"].set_visible(False)
+        ax_drift.spines["right"].set_visible(False)
+
+    axs_displacement = axs_drift.twinx()
+    displacement_traces = np.array([displacement+spatial_bins[i] for i, displacement in enumerate(displacement_arr.transpose())])
+    axs_displacement.plot(displacement_traces.transpose(), color='red', alpha=0.5)
+    fig_drift.savefig(probe_qc_dir / "drift_map.png", dpi=300)
+
+    # calculate cumulative_drift and max displacement
+    cumulative_drift = np.max(np.sum(displacement_arr, axis=0))
+    max_displacement = np.max(displacement_arr)
+
+    # make metric for qc json
+    metric_values = {
+        "cumulative drift": cumulative_drift,
+        "maximum displacement": max_displacement,
+    }
+    value_with_options = {
+        "drift metrics": metric_values,
+        "value": "",
+        "options": ["Good", "High Drift"],
+        "status": ["Pass", "Fail"],
+        "type": "checkbox",
+    }
+    drift_metric = QCMetric(
+        name=f"Probe Drift - {recording_name}",
+        description=f"Evaluation of {recording_name} probe drift",
+        reference=str(probe_qc_dir / "drift_map.png"),
+        value=value_with_options,
+        status_history=[QCStatus(evaluator="", status=Status.PENDING, timestamp=datetime.now())],
+    )
+
+    return drift_metric
+
+
 def generate_units_qc(
     sorting_analyzer: si.SortingAnalyzer,
     recording_name: str,

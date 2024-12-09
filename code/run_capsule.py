@@ -3,14 +3,15 @@
 from pathlib import Path
 import json
 import numpy as np
-
 import spikeinterface as si
+import spikeinterface.widgets as sw
+import shutil
 
 from aind_data_schema.core.processing import Processing
 from aind_data_schema_models.modalities import Modality
 from aind_data_schema.core.quality_control import QualityControl, QCEvaluation, Stage
 
-from qc_utils import generate_raw_qc, generate_units_qc, load_preprocessed_recording, load_processing_metadata
+from qc_utils import generate_raw_qc, generate_units_qc, load_preprocessed_recording, load_processing_metadata, generate_drift_qc
 
 data_folder = Path("../data")
 results_folder = Path("../results")
@@ -40,8 +41,6 @@ if __name__ == "__main__":
     else:
         ecephys_sorted_folder = None
 
-    quality_control_fig_folder = results_folder / "quality_control"
-
     job_json_files = [p for p in data_folder.iterdir() if p.suffix == ".json" and "job" in p.name]
     job_dicts = []
     for job_json_file in job_json_files:
@@ -66,6 +65,7 @@ if __name__ == "__main__":
             recording_base_name = stream_name[: stream_name.find(".zarr")]
             recording = si.read_zarr(stream_folder)
             recording_lfp = None
+
             if "AP" in stream_name:
                 lfp_stream_path = Path(str(stream_folder).replace("AP", "LFP"))
                 if lfp_stream_path.is_dir():
@@ -156,6 +156,15 @@ if __name__ == "__main__":
 
             if recording_preprocessed is not None and sorting_analyzer is not None:
                 sorting_analyzer.set_temporary_recording(recording_preprocessed)
+
+        quality_control_fig_folder = results_folder / "quality_control"
+
+        motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
+        drift_metric = generate_drift_qc(recording, recording_name, motion_path, quality_control_fig_folder)
+        if 'Drift' not in all_metrics_raw:
+            all_metrics_raw['Drift'] = [drift_metric]
+        else:
+            all_metrics_raw['Drift'].append(drift_metric)
 
         metrics_raw = generate_raw_qc(
             recording,
