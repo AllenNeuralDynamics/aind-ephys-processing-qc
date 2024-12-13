@@ -3,14 +3,15 @@
 from pathlib import Path
 import json
 import numpy as np
-
 import spikeinterface as si
+import spikeinterface.widgets as sw
+import shutil
 
 from aind_data_schema.core.processing import Processing
 from aind_data_schema_models.modalities import Modality
 from aind_data_schema.core.quality_control import QualityControl, QCEvaluation, Stage
 
-from qc_utils import generate_raw_qc, generate_units_qc, load_preprocessed_recording, load_processing_metadata
+from qc_utils import generate_raw_qc, generate_units_qc, load_preprocessed_recording, load_processing_metadata, generate_drift_qc
 
 data_folder = Path("../data")
 results_folder = Path("../results")
@@ -40,8 +41,6 @@ if __name__ == "__main__":
     else:
         ecephys_sorted_folder = None
 
-    quality_control_fig_folder = results_folder / "quality_control"
-
     job_json_files = [p for p in data_folder.iterdir() if p.suffix == ".json" and "job" in p.name]
     job_dicts = []
     for job_json_file in job_json_files:
@@ -66,6 +65,7 @@ if __name__ == "__main__":
             recording_base_name = stream_name[: stream_name.find(".zarr")]
             recording = si.read_zarr(stream_folder)
             recording_lfp = None
+
             if "AP" in stream_name:
                 lfp_stream_path = Path(str(stream_folder).replace("AP", "LFP"))
                 if lfp_stream_path.is_dir():
@@ -157,6 +157,8 @@ if __name__ == "__main__":
             if recording_preprocessed is not None and sorting_analyzer is not None:
                 sorting_analyzer.set_temporary_recording(recording_preprocessed)
 
+        quality_control_fig_folder = results_folder / "quality_control"
+
         metrics_raw = generate_raw_qc(
             recording,
             recording_name,
@@ -167,23 +169,32 @@ if __name__ == "__main__":
             processing=processing,
             visualization_output=visualization_output,
         )
+
+        motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
+
+        metrics_drift = generate_drift_qc(
+            recording,
+            recording_name,
+            motion_path,
+            quality_control_fig_folder,
+            relative_to=results_folder
+        )
+
+        metrics_raw.update(metrics_drift)
         for evaluation_name, metric_list in metrics_raw.items():
             if evaluation_name in all_metrics_raw:
                 all_metrics_raw[evaluation_name].extend(metric_list)
             else:
                 all_metrics_raw[evaluation_name] = metric_list
 
-        if sorting_analyzer is not None:
-            metrics_processed = generate_units_qc(
-                sorting_analyzer,
-                recording_name,
-                quality_control_fig_folder,
-                relative_to=results_folder,
-                visualization_output=visualization_output,
-            )
-        else:
-            print(f"No sorting analyzer found for {recording_name}")
-            metrics_processed = {}
+        metrics_processed = generate_units_qc(
+            sorting_analyzer,
+            recording_name,
+            quality_control_fig_folder,
+            relative_to=results_folder,
+            visualization_output=visualization_output,
+        )
+
         for evaluation_name, metric_list in metrics_processed.items():
             if evaluation_name in all_metrics_processed:
                 all_metrics_processed[evaluation_name].extend(metric_list)
