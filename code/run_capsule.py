@@ -159,13 +159,6 @@ if __name__ == "__main__":
 
         quality_control_fig_folder = results_folder / "quality_control"
 
-        motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
-        drift_metric = generate_drift_qc(recording, recording_name, motion_path, quality_control_fig_folder)
-        if 'Drift' not in all_metrics_raw:
-            all_metrics_raw['Drift'] = [drift_metric]
-        else:
-            all_metrics_raw['Drift'].append(drift_metric)
-
         metrics_raw = generate_raw_qc(
             recording,
             recording_name,
@@ -176,23 +169,32 @@ if __name__ == "__main__":
             processing=processing,
             visualization_output=visualization_output,
         )
+
+        motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
+
+        metrics_drift = generate_drift_qc(
+            recording,
+            recording_name,
+            motion_path,
+            quality_control_fig_folder,
+            relative_to=results_folder
+        )
+
+        metrics_raw.update(metrics_drift)
         for evaluation_name, metric_list in metrics_raw.items():
             if evaluation_name in all_metrics_raw:
                 all_metrics_raw[evaluation_name].extend(metric_list)
             else:
                 all_metrics_raw[evaluation_name] = metric_list
 
-        if sorting_analyzer is not None:
-            metrics_processed = generate_units_qc(
-                sorting_analyzer,
-                recording_name,
-                quality_control_fig_folder,
-                relative_to=results_folder,
-                visualization_output=visualization_output,
-            )
-        else:
-            print(f"No sorting analyzer found for {recording_name}")
-            metrics_processed = {}
+        metrics_processed = generate_units_qc(
+            sorting_analyzer,
+            recording_name,
+            quality_control_fig_folder,
+            relative_to=results_folder,
+            visualization_output=visualization_output,
+        )
+
         for evaluation_name, metric_list in metrics_processed.items():
             if evaluation_name in all_metrics_processed:
                 all_metrics_processed[evaluation_name].extend(metric_list)

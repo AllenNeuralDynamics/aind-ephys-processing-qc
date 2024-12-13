@@ -332,7 +332,8 @@ def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None
     ax_rms.set_ylabel("Depth ($\mu m$)")
     ax_rms.spines[["right", "top"]].set_visible(False)
 
-    return fig_rms
+    fig_rms.subplots_adjust(top=0.8)
+    return fig_rms, ax_rms
 
 
 def generate_raw_qc(
@@ -460,20 +461,7 @@ def generate_raw_qc(
     metrics["PSD"] = [psd_wide_metric, psd_hf_metric, psd_lf_metric]
 
     print("Generating NOISE metrics")
-    fig_rms = plot_rms_by_depth(recording, recording_preprocessed)
-    rms_path = recording_fig_folder / "rms.png"
-    fig_rms.savefig(rms_path, dpi=300)
-    if relative_to is not None:
-        rms_path = rms_path.relative_to(relative_to)
-    rms_metric = QCMetric(
-        name=f"RMS {recording_name}",
-        description=f"Evaluation of {recording_name} RMS",
-        reference=str(rms_path),
-        value=None,
-        status_history=[status_pass],
-    )
-    metrics["Noise"] = [rms_metric]
-
+    fig_rms, ax_rms = plot_rms_by_depth(recording, recording_preprocessed)
     # Bad channel detection out of brain, noisy, silent
     if processing is not None:
         try:
@@ -488,21 +476,45 @@ def generate_raw_qc(
                 ):
                     channel_labels = np.array(outputs.get("channel_labels"))
                     if channel_labels is not None:
-                        channel_labels_value = {
+                        metric_values = {
                             "good": int(np.sum(channel_labels == "good")),
                             "noise": int(np.sum(channel_labels == "noise")),
                             "dead": int(np.sum(channel_labels == "dead")),
                             "out": int(np.sum(channel_labels == "out")),
                         }
-                        channel_labels_metric = QCMetric(
-                            name=f"Bad channel detection {recording_name}",
-                            description=f"Evaluation of {recording_name} bad channel detection",
-                            value=channel_labels_value,
-                            status_history=[status_pass],
-                        )
-                        metrics["Noise"].append(channel_labels_metric)
+                        metric_values_str = None
+                        for metric_name, metric_value in metric_values.items():
+                            if metric_values_str is None:
+                                metric_values_str = f"{metric_name}: {metric_value}"
+                            else:
+                                metric_values_str += f"\n{metric_name}: {metric_value}"
+                        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+                        ax_rms.text(0.2, 0.9, metric_values_str, transform=fig_rms.transFigure, fontsize=14,
+                                    verticalalignment='top', bbox=props)
+                        
         except:
             print(f"Failed to load bad channel labels for {recording_name}")
+
+    rms_path = recording_fig_folder / "rms.png"
+    fig_rms.savefig(rms_path, dpi=300)
+    if relative_to is not None:
+        rms_path = rms_path.relative_to(relative_to)
+
+    # make metric for qc json
+    value_with_options = {
+        "value": "",
+        "options": ["Good", "No out channels detected"],
+        "status": ["Pass", "Fail"],
+        "type": "dropdown",
+    }
+    rms_metric = QCMetric(
+        name=f"RMS {recording_name}",
+        description=f"Evaluation of {recording_name} RMS",
+        reference=str(rms_path),
+        value=value_with_options,
+        status_history=[status_pass],
+    )
+    metrics["Noise"] = [rms_metric]
 
     return metrics
 
@@ -511,7 +523,8 @@ def generate_drift_qc(
     recording: si.BaseRecording,
     recording_name: str,
     motion_path: Path,
-    output_qc_path: Path
+    output_qc_path: Path,
+    relative_to: Path | None = None,
 ) -> QCMetric:
     """
     Generate drift metrics for a given sorting result.
@@ -533,21 +546,26 @@ def generate_drift_qc(
         The quality control metric for drift.
     """
 
-    probe_qc_dir = output_qc_path / recording_name
-    probe_qc_dir.mkdir(parents=True, exist_ok=True)
+    print("Generating DRIFT metric")
+
+    recording_fig_folder = output_qc_path / recording_name
+    recording_fig_folder.mkdir(parents=True, exist_ok=True)
 
     # open displacement arrays
-    displacement_arr_path = motion_path/'motion/displacement_seg0.npy'
-    displacement_arr = np.load(displacement_arr_path)
-    spatial_bins = np.load(motion_path/'motion'/'spatial_bins_um.npy')
-    peaks_to_plot = np.load(motion_path / 'peaks.npy')
-    peak_locations_to_plot = np.load(motion_path / 'peak_locations.npy')
+    if not motion_path.is_dir():
+        print(f"\tMotion not found for {recording_name}")
+        return {}
+
+    motion_info = spre.load_motion_info(motion_path)
+    all_peaks = motion_info["peaks"]
+    all_peak_locations = motion_info["peak_locations"]
+    motion = motion_info["motion"]
+    spatial_bins = motion.spatial_bins_um
 
     fig_drift, axs_drift = plt.subplots(
         ncols=recording.get_num_segments(), figsize=(10,10)
     )
     y_locs = recording.get_channel_locations()[:, 1]
-    depth_lim = [np.min(y_locs), np.max(y_locs)]
     sampling_frequency = recording.sampling_frequency
     depth_lim = [np.min(y_locs), np.max(y_locs)]
 
@@ -556,6 +574,10 @@ def generate_drift_qc(
             ax_drift = axs_drift
         else:
             ax_drift = axs_drift[segment_index]
+
+        segment_mask = all_peaks["segment_index"] == segment_index
+        peaks_to_plot = all_peaks[segment_mask]
+        peak_locations_to_plot = all_peak_locations[segment_mask]
 
         _ = sw.plot_drift_raster_map(
             sorting_analyzer=None,
@@ -567,29 +589,40 @@ def generate_drift_qc(
             depth_lim=depth_lim,
             clim=(-200, 0),
             cmap="Greys_r",
-            scatter_decimate=30,
-            alpha=0.15,
+            scatter_decimate=10,
+            alpha=0.3,
             ax=ax_drift,
         )
         ax_drift.spines["top"].set_visible(False)
         ax_drift.spines["right"].set_visible(False)
 
-    axs_displacement = axs_drift.twinx()
-    displacement_traces = np.array([displacement+spatial_bins[i] for i, displacement in enumerate(displacement_arr.transpose())])
-    axs_displacement.plot(displacement_traces.transpose(), color='red', alpha=0.5)
-    fig_drift.savefig(probe_qc_dir / "drift_map.png", dpi=300)
+        displacement_arr = motion.displacement[segment_index]
+        temporal_bins = motion.temporal_bins_s[segment_index]
+        
+        # calculate cumulative_drift and max displacement
+        drift_ptps = np.ptp(displacement_arr, axis=0)
+        cumulative_drifts = np.sum(displacement_arr, axis=0)
+        max_displacement_index = np.argmax(drift_ptps)
+        max_displacement = np.round(drift_ptps[max_displacement_index], 2)
+        depth_at_max_displacement = int(spatial_bins[max_displacement_index])
 
-    # calculate cumulative_drift and max displacement
-    cumulative_drift = np.max(np.sum(displacement_arr, axis=0))
-    max_displacement = np.max(displacement_arr)
+        max_cumulative_drift_index = np.argmax(cumulative_drifts)
+        max_cumulative_drift = np.round(cumulative_drifts[max_cumulative_drift_index], 2)
+        depth_at_max_cumulative_drift = int(spatial_bins[max_cumulative_drift_index])
+
+        ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color='red', alpha=0.5)
+        ax_drift.set_title(
+            f"Max displacement: {max_displacement} $\mu m$ (depth: {depth_at_max_displacement} ) $\\mu m$\n"
+            f"Max cumulative drift: {max_cumulative_drift} $\mu m$ (depth: {depth_at_max_cumulative_drift} ) $\\mu m$\n"
+        )
+
+    drift_map_path = recording_fig_folder / "drift_map.png"
+    fig_drift.savefig(drift_map_path, dpi=300)
+    if relative_to is not None:
+        drift_map_path = drift_map_path.relative_to(relative_to)
 
     # make metric for qc json
-    metric_values = {
-        "cumulative drift": cumulative_drift,
-        "maximum displacement": max_displacement,
-    }
     value_with_options = {
-        "drift metrics": metric_values,
         "value": "",
         "options": ["Good", "High Drift"],
         "status": ["Pass", "Fail"],
@@ -598,16 +631,17 @@ def generate_drift_qc(
     drift_metric = QCMetric(
         name=f"Probe Drift - {recording_name}",
         description=f"Evaluation of {recording_name} probe drift",
-        reference=str(probe_qc_dir / "drift_map.png"),
+        reference=str(drift_map_path),
         value=value_with_options,
         status_history=[QCStatus(evaluator="", status=Status.PENDING, timestamp=datetime.now())],
     )
+    drift_metrics = {"Drift": [drift_metric]}
 
-    return drift_metric
+    return drift_metrics
 
 
 def generate_units_qc(
-    sorting_analyzer: si.SortingAnalyzer,
+    sorting_analyzer: si.SortingAnalyzer | None,
     recording_name: str,
     output_qc_path: Path,
     relative_to: Path | None = None,
@@ -650,6 +684,10 @@ def generate_units_qc(
     status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
 
     print("Generating UNIT YIELD metric")
+    if sorting_analyzer is None:
+        print(f"\tNo sorting analyzer found for {recording_name}")
+        return metrics
+
     number_of_units = sorting_analyzer.get_num_units()
 
     decoder_label = sorting_analyzer.sorting.get_property("decoder_label")
@@ -662,61 +700,92 @@ def generate_units_qc(
 
     quality_metrics = sorting_analyzer.get_extension("quality_metrics").get_data()
 
-    fig_yield, ax_yield = plt.subplots(1, 5, figsize=(15, 6))
+    fig_yield, axs_yield = plt.subplots(2, 3, figsize=(15, 10))
 
-    ax_yield[0].hist(quality_metrics["isi_violations_ratio"], bins=20)
-    ax_yield[0].set_xscale("log")
-    ax_yield[0].set_title(f"ISI Violations")
-    ax_yield[0].set_xlabel("violation rate")
+    bins = np.linspace(0, 2, 20)
+    ax_isi = axs_yield[0, 0]
+    ax_isi.hist(quality_metrics["isi_violations_ratio"], bins=bins, density=True)
+    ax_isi.set_xscale("log")
+    ax_isi.set_title(f"ISI Violations Ratio")
+    ax_isi.spines[["top", "right"]].set_visible(False) 
 
-    ax_yield[1].hist(quality_metrics["amplitude_cutoff"], bins=20, density=True)
-    ax_yield[1].set_title(f"Amplitude Cutoff")
-    ax_yield[1].set_xlabel("frequency")
+    ax_amp_cutoff = axs_yield[0, 1]
+    ax_amp_cutoff.hist(quality_metrics["amplitude_cutoff"], bins=20, density=True)
+    ax_amp_cutoff.set_title(f"Amplitude Cutoff")
+    ax_amp_cutoff.spines[["top", "right"]].set_visible(False) 
 
-    ax_yield[2].hist(quality_metrics["presence_ratio"], bins=20, density=True)
-    ax_yield[2].set_title(f"Presence Ratio")
-    ax_yield[2].set_xlabel("fraction of session")
+    ax_presence_ratio = axs_yield[0, 2]
+    ax_presence_ratio.hist(quality_metrics["presence_ratio"], bins=20, density=True)
+    ax_presence_ratio.set_title(f"Presence Ratio")
+    ax_presence_ratio.spines[["top", "right"]].set_visible(False) 
 
     channel_indices = np.array(
         list(si.get_template_extremum_channel(sorting_analyzer, mode="peak_to_peak", outputs="index").values())
     )
+    channel_depths = sorting_analyzer.get_channel_locations()[channel_indices, 1]
     amplitudes = np.array(list(si.get_template_extremum_amplitude(sorting_analyzer, mode="peak_to_peak").values()))
     amplitudes[amplitudes > max_amplitude_for_visualization] = max_amplitude_for_visualization
-    df_amplitudes_channel_indices = pd.DataFrame({"amplitude": amplitudes, "peak_channel": channel_indices})
-    mean_amplitude_by_peak_channel = df_amplitudes_channel_indices.groupby("peak_channel").mean()
+    df_amplitudes_depths = pd.DataFrame({"amplitude": amplitudes, "channel_depth": channel_depths})
+    mean_amplitude_by_depth = df_amplitudes_depths.groupby("channel_depth").mean()
 
     colors = {"sua": "green", "mua": "orange", "noise": "red"}
+    ax_amplitudes = axs_yield[1, 0]
     for label in np.unique(decoder_label):
         mask = decoder_label == label
-        ax_yield[3].scatter(amplitudes[mask], channel_indices[mask], c=colors[label], label=label, alpha=0.4)
+        ax_amplitudes.scatter(amplitudes[mask], channel_depths[mask], c=colors[label], label=label, alpha=0.4)
 
-    smoothed_amplitude = savgol_filter(mean_amplitude_by_peak_channel["amplitude"], 10, 2)
-    ax_yield[3].plot(smoothed_amplitude, mean_amplitude_by_peak_channel.index.tolist(), c="r")
-    ax_yield[3].set_title("Unit Amplitude By Depth")
-    ax_yield[3].set_xlabel("uV")
-    ax_yield[3].set_ylabel("Channel Index")
-    ax_yield[3].legend()
+    smoothed_amplitude = savgol_filter(mean_amplitude_by_depth["amplitude"], 10, 2)
+    ax_amplitudes.plot(smoothed_amplitude, mean_amplitude_by_depth.index.tolist(), c="r")
+    ax_amplitudes.set_title("Unit Amplitude By Depth")
+    ax_amplitudes.set_xlabel("Amplitude ($\\mu V$)")
+    ax_amplitudes.set_ylabel("Depth ($\\mu m$)")
+    ax_amplitudes.legend()
+    ax_amplitudes.spines[["top", "right"]].set_visible(False) 
 
+    ax_fr = axs_yield[1, 1]
     firing_rate = np.array(quality_metrics["firing_rate"].tolist())
     firing_rate[firing_rate > max_firing_rate_for_visualization] = max_firing_rate_for_visualization
-    df_firing_rate_channel_indices = pd.DataFrame({"firing_rate": firing_rate, "peak_channel": channel_indices})
-    mean_firing_rate_by_peak_channel = df_firing_rate_channel_indices.groupby("peak_channel").mean()
-
+    df_firing_rate_depths = pd.DataFrame({"firing_rate": firing_rate, "channel_depth": channel_depths})
+    mean_firing_rate_by_depth = df_firing_rate_depths.groupby("channel_depth").mean()
+    
     for label in np.unique(decoder_label):
         mask = decoder_label == label
-        ax_yield[4].scatter(firing_rate[mask], channel_indices[mask], c=colors[label], label=label, alpha=0.4)
+        ax_fr.scatter(firing_rate[mask], channel_depths[mask], c=colors[label], label=label, alpha=0.4)
 
-    smoothed_firing_rate = savgol_filter(mean_firing_rate_by_peak_channel["firing_rate"], 10, 2)
-    ax_yield[4].plot(smoothed_firing_rate, mean_firing_rate_by_peak_channel.index.tolist(), c="r")
-    ax_yield[4].set_title("Unit Firing Rate By Depth")
-    ax_yield[4].set_xlabel("spikes/s")
-    ax_yield[4].set_ylabel("Channel Index")
-    ax_yield[4].legend()
+    smoothed_firing_rate = savgol_filter(mean_firing_rate_by_depth["firing_rate"], 10, 2)
+    ax_fr.plot(smoothed_firing_rate, mean_firing_rate_by_depth.index.tolist(), c="r")
+    ax_fr.set_title("Unit Firing Rate By Depth")
+    ax_fr.set_xlabel("Firing rate (Hz)")
+    ax_fr.set_ylabel("Depth ($\\mu m$)")
+    ax_fr.legend()
+    ax_fr.spines[["top", "right"]].set_visible(False) 
 
-    fig_yield.suptitle("Unit Metrics Yield")
+    ax_text = axs_yield[1, 2]
+    ax_text.axis("off")
+
+    metric_values = {
+        "# units": number_of_units,
+        "# SUA": number_of_sua_units,
+        "# MUA": number_of_mua_units,
+        "# noise": number_of_noise_units,
+        "# passing default QC": number_of_good_units,
+    }
+
+    metric_values_str = None
+    for metric_name, metric_value in metric_values.items():
+        if metric_values_str is None:
+            metric_values_str = f"{metric_name}: {metric_value}"
+        else:
+            metric_values_str += f"\n{metric_name}: {metric_value}"
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax_text.text(0, 1, metric_values_str, transform=ax_text.transAxes, fontsize=14,
+                 verticalalignment='top', bbox=props)
+
+    fig_yield.suptitle("Unit Metrics Yield", fontsize=15)
     fig_yield.tight_layout()
     unit_yield_path = recording_fig_folder / "unit_yield.png"
     fig_yield.savefig(unit_yield_path, dpi=300)
+    
     if relative_to is not None:
         unit_yield_path = unit_yield_path.relative_to(relative_to)
 
@@ -726,17 +795,7 @@ def generate_units_qc(
         else:
             sorting_summary_link = f"No sorting summary link found for {recording_name}."
 
-    metric_values = {
-        "number_of_total_units": number_of_units,
-        "number_of_sua_units": number_of_sua_units,
-        "number_of_mua_units": number_of_mua_units,
-        "number_of_noise_units": number_of_noise_units,
-        "number_of_units_passing_quality_metrics": number_of_good_units,
-        "sorting_summary_visualization_link": sorting_summary_link,
-    }
-
     value_with_options = {
-        "unit quality metrics": metric_values,
         "value": "",
         "options": ["Good", "Low Yield", "High Noise"],
         "status": ["Pass", "Fail", "Fail"],
@@ -744,7 +803,7 @@ def generate_units_qc(
     }
     yield_metric = QCMetric(
         name=f"Unit Metrics Yield - {recording_name}",
-        description=f"Evaluation of {recording_name} unit metrics yield",
+        description=f"Evaluation of {recording_name} unit metrics yield. Sortingview link: {sorting_summary_link}",
         reference=str(unit_yield_path),
         value=value_with_options,
         status_history=[status_pending],
@@ -779,8 +838,8 @@ def generate_units_qc(
         axs_fr[segment_index, 0].set_title(f"Population firing rate")
         axs_fr[segment_index, 0].set_xlabel("Time (s)")
         axs_fr[segment_index, 0].set_ylabel("Firing rate (Hz)")
+        axs_fr[segment_index, 0].spines[["top", "right"]].set_visible(False)
 
-    fig_fr.suptitle("Firing Rate")
     fig_fr.tight_layout()
     firing_rate_path = recording_fig_folder / "firing_rate.png"
     fig_fr.savefig(firing_rate_path, dpi=300)
