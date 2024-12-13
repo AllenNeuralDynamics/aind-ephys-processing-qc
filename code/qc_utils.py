@@ -626,7 +626,7 @@ def generate_drift_qc(
         "value": "",
         "options": ["Good", "High Drift"],
         "status": ["Pass", "Fail"],
-        "type": "checkbox",
+        "type": "dropdown",
     }
     drift_metric = QCMetric(
         name=f"Probe Drift - {recording_name}",
@@ -799,7 +799,7 @@ def generate_units_qc(
         "value": "",
         "options": ["Good", "Low Yield", "High Noise"],
         "status": ["Pass", "Fail", "Fail"],
-        "type": "checkbox",
+        "type": "dropdown",
     }
     yield_metric = QCMetric(
         name=f"Unit Metrics Yield - {recording_name}",
