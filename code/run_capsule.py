@@ -1,23 +1,51 @@
 """ Quality control for ecephys pipeline """
 
 from pathlib import Path
+import shutil
 import json
 import numpy as np
-import spikeinterface as si
-import spikeinterface.widgets as sw
-import shutil
+import argparse
+import time
+import logging
 
-from aind_data_schema.core.processing import Processing
+import spikeinterface as si
+
 from aind_data_schema_models.modalities import Modality
 from aind_data_schema.core.quality_control import QualityControl, QCEvaluation, Stage
 
-from qc_utils import generate_raw_qc, generate_units_qc, load_preprocessed_recording, load_processing_metadata, generate_drift_qc
+from qc_utils import (
+    load_preprocessed_recording,
+    load_processing_metadata,
+    generate_raw_qc,
+    generate_units_qc,
+    generate_drift_qc,
+    generate_event_qc,
+)
 
 data_folder = Path("../data")
 results_folder = Path("../results")
 
 
+# define argument parser
+parser = argparse.ArgumentParser(description="Generate Ephys QC data")
+
+copy_sorted_to_results_group = parser.add_mutually_exclusive_group()
+copy_sorted_to_results_help = "Whether to copy the sorted data to the results folder"
+copy_sorted_to_results_group.add_argument(
+    "--copy-sorted-to-results", action="store_true", help=copy_sorted_to_results_help
+)
+copy_sorted_to_results_group.add_argument(
+    "static_copy_sorted_to_results", nargs="?", default="false", help=copy_sorted_to_results_help
+)
+
+
 if __name__ == "__main__":
+    logging.info("\nEPHYS QC")
+    t_qc_start_all = time.perf_counter()
+    args = parser.parse_args()
+
+    COPY_SORTED_TO_RESULTS = True if args.copy_sorted_to_results else args.static_copy_sorted_to_results == "true"
+
     # pipeline mode VS capsule mode
     ecephys_folders = [
         p
@@ -47,10 +75,10 @@ if __name__ == "__main__":
         with open(job_json_file) as f:
             job_dict = json.load(f)
         job_dicts.append(job_dict)
-    print(f"Found {len(job_dicts)} JSON job files")
+    logging.info(f"Found {len(job_dicts)} JSON job files")
 
     if len(job_dicts) == 0:
-        print("Parsing AIND-specific input data")
+        logging.info("Parsing AIND-specific input data")
         # here we load the compressed recordings
         if (ecephys_folder / "ecephys").is_dir():
             ecephys_compressed_folder = ecephys_folder / "ecephys" / "ecephys_compressed"
@@ -83,7 +111,7 @@ if __name__ == "__main__":
                     num_negative_times = np.sum(times_diff < 0)
 
                     if num_negative_times > 0:
-                        print(f"\t{recording_name} - Times not monotonically increasing.")
+                        logging.info(f"\t{recording_name} - Times not monotonically increasing.")
                         skip_times = True
                 job_dict["skip_times"] = skip_times
 
@@ -105,7 +133,7 @@ if __name__ == "__main__":
                             recursive=True, relative_to=data_folder
                         )
                     job_dicts.append(job_dict)
-        print(f"Found {len(job_dicts)} recordings")
+        logging.info(f"Found {len(job_dicts)} recordings")
 
     processing_json_file = ecephys_sorted_folder / "processing.json"
     processing = None
@@ -117,6 +145,11 @@ if __name__ == "__main__":
     if visualization_json_file.is_file():
         with open(visualization_json_file) as f:
             visualization_output = json.load(f)
+
+    harp_folder = [p for p in (ecephys_folder / "behavior").glob("**/raw.harp")]
+    if len(harp_folder) == 1:
+        harp_folder = harp_folder[0]
+        logging.info("Harp folder found")
 
     # look for JSON files or loop through preprocessed
     all_metrics_raw = {}
@@ -134,7 +167,7 @@ if __name__ == "__main__":
             recording_lfp = None
         recording_name = job_dict["recording_name"]
         session_name = job_dict["session_name"]
-        print(f"Recording {recording_name}")
+        logging.info(f"Recording {recording_name}")
         recording_preprocessed = None
         if ecephys_sorted_folder is not None:
             preprocessed_json_file = ecephys_sorted_folder / "preprocessed" / f"{recording_name}.json"
@@ -173,14 +206,15 @@ if __name__ == "__main__":
         motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
 
         metrics_drift = generate_drift_qc(
-            recording,
-            recording_name,
-            motion_path,
-            quality_control_fig_folder,
-            relative_to=results_folder
+            recording, recording_name, motion_path, quality_control_fig_folder, relative_to=results_folder
         )
-
         metrics_raw.update(metrics_drift)
+
+        metrics_event = generate_event_qc(
+            recording, recording_name, harp_folder, quality_control_fig_folder, relative_to=results_folder
+        )
+        metrics_raw.update(metrics_event)
+
         for evaluation_name, metric_list in metrics_raw.items():
             if evaluation_name in all_metrics_raw:
                 all_metrics_raw[evaluation_name].extend(metric_list)
@@ -211,7 +245,6 @@ if __name__ == "__main__":
             name=evaluation_name,
             description=evaluation_name,
             metrics=metrics,
-            allow_failed_metrics=True,
         )
         evaluations.append(evaluation)
 
@@ -222,7 +255,6 @@ if __name__ == "__main__":
             name=evaluation_name,
             description=evaluation_name,
             metrics=metrics,
-            allow_failed_metrics=True,
         )
         evaluations.append(evaluation)
 
@@ -231,3 +263,12 @@ if __name__ == "__main__":
 
     with (results_folder / "quality_control.json").open("w") as f:
         f.write(quality_control.model_dump_json(indent=3))
+
+    if COPY_SORTED_TO_RESULTS:
+        shutil.copytree(ecephys_sorted_folder, results_folder)
+        logging.info(f"Sorted data copied to results folder")
+
+    t_qc_end_all = time.perf_counter()
+    elapsed_time_preprocessing_all = np.round(t_qc_end_all - t_qc_start_all, 2)
+
+    logging.info(f"EPHYS QC time: {elapsed_time_preprocessing_all}s")
