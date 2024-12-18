@@ -14,7 +14,13 @@ from aind_data_schema.core.processing import Processing
 from aind_data_schema_models.modalities import Modality
 from aind_data_schema.core.quality_control import QualityControl, QCEvaluation, Stage
 
-from qc_utils import generate_raw_qc, generate_units_qc, load_preprocessed_recording, load_processing_metadata, generate_drift_qc
+from qc_utils import (
+    generate_raw_qc,
+    generate_units_qc,
+    load_preprocessed_recording,
+    load_processing_metadata,
+    generate_drift_qc,
+)
 
 data_folder = Path("../data")
 results_folder = Path("../results")
@@ -25,11 +31,12 @@ parser = argparse.ArgumentParser(description="Generate Ephys QC data")
 
 copy_sorted_to_results_group = parser.add_mutually_exclusive_group()
 copy_sorted_to_results_help = "Whether to copy the sorted data to the results folder"
-copy_sorted_to_results_group.add_argument("--copy-sorted-to-results", action="store_true", help=copy_sorted_to_results_help)
+copy_sorted_to_results_group.add_argument(
+    "--copy-sorted-to-results", action="store_true", help=copy_sorted_to_results_help
+)
 copy_sorted_to_results_group.add_argument(
     "static_copy_sorted_to_results", nargs="?", default="false", help=copy_sorted_to_results_help
 )
-
 
 
 if __name__ == "__main__":
@@ -194,11 +201,7 @@ if __name__ == "__main__":
         motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
 
         metrics_drift = generate_drift_qc(
-            recording,
-            recording_name,
-            motion_path,
-            quality_control_fig_folder,
-            relative_to=results_folder
+            recording, recording_name, motion_path, quality_control_fig_folder, relative_to=results_folder
         )
 
         metrics_raw.update(metrics_drift)
