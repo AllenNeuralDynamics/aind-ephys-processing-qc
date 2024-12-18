@@ -10,16 +10,16 @@ import logging
 
 import spikeinterface as si
 
-from aind_data_schema.core.processing import Processing
 from aind_data_schema_models.modalities import Modality
 from aind_data_schema.core.quality_control import QualityControl, QCEvaluation, Stage
 
 from qc_utils import (
-    generate_raw_qc,
-    generate_units_qc,
     load_preprocessed_recording,
     load_processing_metadata,
+    generate_raw_qc,
+    generate_units_qc,
     generate_drift_qc,
+    generate_event_qc,
 )
 
 data_folder = Path("../data")
@@ -146,6 +146,11 @@ if __name__ == "__main__":
         with open(visualization_json_file) as f:
             visualization_output = json.load(f)
 
+    harp_folder = [p for p in (ecephys_folder / "behavior").glob("**/raw.harp")]
+    if len(harp_folder) == 1:
+        harp_folder = harp_folder[0]
+        logging.info("Harp folder found")
+
     # look for JSON files or loop through preprocessed
     all_metrics_raw = {}
     all_metrics_processed = {}
@@ -203,8 +208,13 @@ if __name__ == "__main__":
         metrics_drift = generate_drift_qc(
             recording, recording_name, motion_path, quality_control_fig_folder, relative_to=results_folder
         )
-
         metrics_raw.update(metrics_drift)
+
+        metrics_event = generate_event_qc(
+            recording, recording_name, harp_folder, quality_control_fig_folder, relative_to=results_folder
+        )
+        metrics_raw.update(metrics_event)
+
         for evaluation_name, metric_list in metrics_raw.items():
             if evaluation_name in all_metrics_raw:
                 all_metrics_raw[evaluation_name].extend(metric_list)
