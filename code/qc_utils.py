@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-import numpy as np
-import pandas as pd
+import logging
 import json
 from datetime import datetime
+
+import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.signal import welch, savgol_filter
-
 
 import spikeinterface as si
 import spikeinterface.preprocessing as spre
@@ -35,7 +36,7 @@ def load_preprocessed_recording(preprocessed_json_file, session_name, ecephys_fo
         except:
             pass
     if recording_preprocessed is None:
-        print(f"Error loading preprocessed data...")
+        logging.info(f"Error loading preprocessed data...")
     return recording_preprocessed
 
 
@@ -305,7 +306,7 @@ def plot_psd(
 def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None):
     """ """
     num_segments = recording.get_num_segments()
-    fig_rms, ax_rms = plt.subplots(figsize=(5, 12))
+    fig_rms, ax_rms = plt.subplots(figsize=(5, 8))
 
     if recording_lfp is None:
         # this means the recording is wide-band, so we apply an additional hp filter
@@ -380,7 +381,7 @@ def generate_raw_qc(
     status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
     status_pass = QCStatus(evaluator="", status=Status.PASS, timestamp=now)
 
-    print("Generating RAW DATA metrics")
+    logging.info("Generating RAW DATA metrics")
     fig_raw = plot_raw_data(recording, recording_lfp)
     raw_traces_path = recording_fig_folder / "traces_raw.png"
     fig_raw.savefig(raw_traces_path, dpi=300)
@@ -393,21 +394,26 @@ def generate_raw_qc(
         "status": ["Pass", "Fail", "Fail"],
         "type": "dropdown",
     }
+
     if visualization_output is not None:
-        visualization_rec = visualization_output.get(recording_name)
-        if visualization_rec:
-            raw_data_value_with_flags["timeseries_link"] = visualization_rec.get("timeseries")
+        if recording_name in visualization_output:
+            timeseries_link = visualization_output[recording_name].get("timeseries")
+            timeseries_str = f"[Sortingview link]({timeseries_link})"
+        else:
+            timeseries_str = f"No timeseries link found for {recording_name}."
+    else:
+        timeseries_str = "No visualization output found in results."
 
     raw_data_metric = QCMetric(
         name=f"Raw data {recording_name} ",
-        description=f"Evaluation of {recording_name} raw data",
+        description=f"Evaluation of {recording_name} raw data. {timeseries_str}",
         value=raw_data_value_with_flags,
         reference=str(raw_traces_path),
         status_history=[status_pending],
     )
     metrics["Raw Data"] = [raw_data_metric]
 
-    print("Generating PSD metrics")
+    logging.info("Generating PSD metrics")
     fig_psd_wide, fig_psd_hf, fig_psd_lf = plot_psd(recording, recording_lfp=recording_lfp)
     psd_wide_path = recording_fig_folder / "psd_wide.png"
     psd_hf_path = recording_fig_folder / "psd_hf.png"
@@ -454,13 +460,13 @@ def generate_raw_qc(
     psd_lf_metric = QCMetric(
         name=f"PSD (Low Frequency) {recording_name}",
         description=f"Evaluation of {recording_name} low-frequency power spectrum density",
-        reference=str(psd_hf_path),
+        reference=str(psd_lf_path),
         value=lf_value_with_flags,
         status_history=[status_pending],
     )
     metrics["PSD"] = [psd_wide_metric, psd_hf_metric, psd_lf_metric]
 
-    print("Generating NOISE metrics")
+    logging.info("Generating NOISE metrics")
     fig_rms, ax_rms = plot_rms_by_depth(recording, recording_preprocessed)
     # Bad channel detection out of brain, noisy, silent
     if processing is not None:
@@ -493,7 +499,7 @@ def generate_raw_qc(
                                     verticalalignment='top', bbox=props)
                         
         except:
-            print(f"Failed to load bad channel labels for {recording_name}")
+            logging.info(f"Failed to load bad channel labels for {recording_name}")
 
     rms_path = recording_fig_folder / "rms.png"
     fig_rms.savefig(rms_path, dpi=300)
@@ -546,14 +552,14 @@ def generate_drift_qc(
         The quality control metric for drift.
     """
 
-    print("Generating DRIFT metric")
+    logging.info("Generating DRIFT metric")
 
     recording_fig_folder = output_qc_path / recording_name
     recording_fig_folder.mkdir(parents=True, exist_ok=True)
 
     # open displacement arrays
     if not motion_path.is_dir():
-        print(f"\tMotion not found for {recording_name}")
+        logging.info(f"\tMotion not found for {recording_name}")
         return {}
 
     motion_info = spre.load_motion_info(motion_path)
@@ -624,8 +630,8 @@ def generate_drift_qc(
     # make metric for qc json
     value_with_options = {
         "value": "",
-        "options": ["Good", "High Drift"],
-        "status": ["Pass", "Fail"],
+        "options": ["Good", "High drift", "Bad drift estimation"],
+        "status": ["Pass", "Fail", "Fail"],
         "type": "dropdown",
     }
     drift_metric = QCMetric(
@@ -638,7 +644,6 @@ def generate_drift_qc(
     drift_metrics = {"Drift": [drift_metric]}
 
     return drift_metrics
-
 
 def generate_units_qc(
     sorting_analyzer: si.SortingAnalyzer | None,
@@ -683,9 +688,9 @@ def generate_units_qc(
     now = datetime.now()
     status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
 
-    print("Generating UNIT YIELD metric")
+    logging.info("Generating UNIT YIELD metric")
     if sorting_analyzer is None:
-        print(f"\tNo sorting analyzer found for {recording_name}")
+        logging.info(f"\tNo sorting analyzer found for {recording_name}")
         return metrics
 
     number_of_units = sorting_analyzer.get_num_units()
@@ -792,8 +797,11 @@ def generate_units_qc(
     if visualization_output is not None:
         if recording_name in visualization_output:
             sorting_summary_link = visualization_output[recording_name].get("sorting_summary")
+            sorting_summary_str = f"[Sortingview link]({sorting_summary_link})"
         else:
-            sorting_summary_link = f"No sorting summary link found for {recording_name}."
+            sorting_summary_str = f"No sorting summary link found for {recording_name}."
+    else:
+        sorting_summary_str = "No visualization output found in results."
 
     value_with_options = {
         "value": "",
@@ -803,14 +811,14 @@ def generate_units_qc(
     }
     yield_metric = QCMetric(
         name=f"Unit Metrics Yield - {recording_name}",
-        description=f"Evaluation of {recording_name} unit metrics yield. Sortingview link: {sorting_summary_link}",
+        description=f"Evaluation of {recording_name} unit metrics yield. {sorting_summary_str}",
         reference=str(unit_yield_path),
         value=value_with_options,
         status_history=[status_pending],
     )
     metrics["Unit Yield"] = [yield_metric]
 
-    print("Generating FIRING RATE metric")
+    logging.info("Generating FIRING RATE metric")
     num_segments = sorting_analyzer.get_num_segments()
     fig_fr, axs_fr = _get_fig_axs(num_segments, 1, subplot_figsize=(5, 3))
     spike_vector = sorting_analyzer.sorting.to_spike_vector()

@@ -3,9 +3,9 @@
 from pathlib import Path
 import json
 import numpy as np
+import logging
+
 import spikeinterface as si
-import spikeinterface.widgets as sw
-import shutil
 
 from aind_data_schema.core.processing import Processing
 from aind_data_schema_models.modalities import Modality
@@ -47,10 +47,10 @@ if __name__ == "__main__":
         with open(job_json_file) as f:
             job_dict = json.load(f)
         job_dicts.append(job_dict)
-    print(f"Found {len(job_dicts)} JSON job files")
+    logging.info(f"Found {len(job_dicts)} JSON job files")
 
     if len(job_dicts) == 0:
-        print("Parsing AIND-specific input data")
+        logging.info("Parsing AIND-specific input data")
         # here we load the compressed recordings
         if (ecephys_folder / "ecephys").is_dir():
             ecephys_compressed_folder = ecephys_folder / "ecephys" / "ecephys_compressed"
@@ -83,7 +83,7 @@ if __name__ == "__main__":
                     num_negative_times = np.sum(times_diff < 0)
 
                     if num_negative_times > 0:
-                        print(f"\t{recording_name} - Times not monotonically increasing.")
+                        logging.info(f"\t{recording_name} - Times not monotonically increasing.")
                         skip_times = True
                 job_dict["skip_times"] = skip_times
 
@@ -105,7 +105,7 @@ if __name__ == "__main__":
                             recursive=True, relative_to=data_folder
                         )
                     job_dicts.append(job_dict)
-        print(f"Found {len(job_dicts)} recordings")
+        logging.info(f"Found {len(job_dicts)} recordings")
 
     processing_json_file = ecephys_sorted_folder / "processing.json"
     processing = None
@@ -134,7 +134,7 @@ if __name__ == "__main__":
             recording_lfp = None
         recording_name = job_dict["recording_name"]
         session_name = job_dict["session_name"]
-        print(f"Recording {recording_name}")
+        logging.info(f"Recording {recording_name}")
         recording_preprocessed = None
         if ecephys_sorted_folder is not None:
             preprocessed_json_file = ecephys_sorted_folder / "preprocessed" / f"{recording_name}.json"
@@ -211,7 +211,6 @@ if __name__ == "__main__":
             name=evaluation_name,
             description=evaluation_name,
             metrics=metrics,
-            allow_failed_metrics=True,
         )
         evaluations.append(evaluation)
 
@@ -222,7 +221,6 @@ if __name__ == "__main__":
             name=evaluation_name,
             description=evaluation_name,
             metrics=metrics,
-            allow_failed_metrics=True,
         )
         evaluations.append(evaluation)
 
