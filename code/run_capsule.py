@@ -1,8 +1,11 @@
 """ Quality control for ecephys pipeline """
 
 from pathlib import Path
+import shutil
 import json
 import numpy as np
+import argparse
+import time
 import logging
 
 import spikeinterface as si
@@ -17,7 +20,25 @@ data_folder = Path("../data")
 results_folder = Path("../results")
 
 
+# define argument parser
+parser = argparse.ArgumentParser(description="Generate Ephys QC data")
+
+copy_sorted_to_results_group = parser.add_mutually_exclusive_group()
+copy_sorted_to_results_help = "Whether to copy the sorted data to the results folder"
+copy_sorted_to_results_group.add_argument("--copy-sorted-to-results", action="store_true", help=copy_sorted_to_results_help)
+copy_sorted_to_results_group.add_argument(
+    "static_copy_sorted_to_results", nargs="?", default="false", help=copy_sorted_to_results_help
+)
+
+
+
 if __name__ == "__main__":
+    logging.info("\nEPHYS QC")
+    t_qc_start_all = time.perf_counter()
+    args = parser.parse_args()
+
+    COPY_SORTED_TO_RESULTS = True if args.copy_sorted_to_results else args.static_copy_sorted_to_results == "true"
+
     # pipeline mode VS capsule mode
     ecephys_folders = [
         p
@@ -229,3 +250,12 @@ if __name__ == "__main__":
 
     with (results_folder / "quality_control.json").open("w") as f:
         f.write(quality_control.model_dump_json(indent=3))
+
+    if COPY_SORTED_TO_RESULTS:
+        shutil.copytree(ecephys_sorted_folder, results_folder)
+        logging.info(f"Sorted data copied to results folder")
+
+    t_qc_end_all = time.perf_counter()
+    elapsed_time_preprocessing_all = np.round(t_qc_end_all - t_qc_start_all, 2)
+
+    logging.info(f"EPHYS QC time: {elapsed_time_preprocessing_all}s")
