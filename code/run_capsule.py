@@ -196,6 +196,7 @@ if __name__ == "__main__":
     all_metrics_raw = {}
     all_metrics_processed = {}
     for job_dict in job_dicts:
+        recording_name = job_dict["recording_name"]
         recording = si.load_extractor(job_dict["recording_dict"], base_folder=data_folder)
         if job_dict["skip_times"]:
             logging.info(f"Resetting times for {recording_name}")
@@ -207,7 +208,6 @@ if __name__ == "__main__":
                 recording_lfp.reset_times()
         else:
             recording_lfp = None
-        recording_name = job_dict["recording_name"]
         session_name = job_dict["session_name"]
         logging.info(f"Recording {recording_name}")
         recording_preprocessed = None
