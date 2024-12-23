@@ -19,25 +19,40 @@ from aind_data_schema.core.processing import Processing
 from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status
 
 
+def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
+    figsize = (subplot_figsize[0] * ncols, subplot_figsize[1] * nrows)
+    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
+    if not isinstance(axs, np.ndarray):
+        axs = np.array([axs])[:, None]
+    elif nrows == 1:
+        axs = axs[None, :]
+    elif ncols == 1:
+        axs = axs[:, None]
+    return fig, axs
+
+
 def load_preprocessed_recording(preprocessed_json_file, session_name, ecephys_folder, data_folder):
     recording_preprocessed = None
-    try:
-        recording_preprocessed = si.load_extractor(preprocessed_json_file, base_folder=data_folder)
-    except Exception as e:
-        pass
-    if recording_preprocessed is None:
+    if preprocessed_json_file.is_file():
         try:
-            json_str = json.dumps(json.load(open(preprocessed_json_file)))
-            if "ecephys_session" in json_str:
-                json_str_remapped = json_str.replace("ecephys_session", ecephys_folder.name)
-            elif ecephys_folder.name != session_name and session_name in json_str:
-                json_str_remapped = json_str.replace(session_name, ecephys_folder.name)
-            recording_dict = json.loads(json_str_remapped)
-            recording_preprocessed = si.load_extractor(recording_dict, base_folder=data_folder)
-        except:
+            recording_preprocessed = si.load_extractor(preprocessed_json_file, base_folder=data_folder)
+        except Exception as e:
             pass
-    if recording_preprocessed is None:
-        logging.info(f"Error loading preprocessed data...")
+        if recording_preprocessed is None:
+            try:
+                json_str = json.dumps(json.load(open(preprocessed_json_file)))
+                if "ecephys_session" in json_str:
+                    json_str_remapped = json_str.replace("ecephys_session", ecephys_folder.name)
+                elif ecephys_folder.name != session_name and session_name in json_str:
+                    json_str_remapped = json_str.replace(session_name, ecephys_folder.name)
+                recording_dict = json.loads(json_str_remapped)
+                recording_preprocessed = si.load_extractor(recording_dict, base_folder=data_folder)
+            except:
+                pass
+        if recording_preprocessed is None:
+            logging.info(f"Error loading preprocessed data...")
+    else:
+        logging.info(f"Preprocessed recording not found...")
     return recording_preprocessed
 
 
@@ -55,18 +70,6 @@ def load_processing_metadata(processing_json):
             new_data_processes.append(dp)
     processing_dict["processing_pipeline"]["data_processes"] = new_data_processes
     return Processing(**processing_dict)
-
-
-def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
-    figsize = (subplot_figsize[0] * ncols, subplot_figsize[1] * nrows)
-    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
-    if not isinstance(axs, np.ndarray):
-        axs = np.array([axs])[:, None]
-    elif nrows == 1:
-        axs = axs[None, :]
-    elif ncols == 1:
-        axs = axs[:, None]
-    return fig, axs
 
 
 def plot_raw_data(
@@ -657,7 +660,7 @@ def generate_event_qc(
     recording_name: str,
     output_qc_path: Path,
     relative_to: Path | None = None,
-    harp_folder: Path | None = None,
+    event_dict: dict | None = None,
     event_keys: list[str] = ["licktime", "optogeneticstime"],
     t_cutout_saturation_s: float = 0.002,
     num_saturation_events_to_plot: int = 3,
@@ -671,6 +674,7 @@ def generate_event_qc(
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
     now = datetime.now()
     status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
+    status_pass = QCStatus(evaluator="", status=Status.PASS, timestamp=now)
 
     logging.info("Generating SATURATION metric")
 
@@ -687,23 +691,25 @@ def generate_event_qc(
         recording_ps = spre.phase_shift(recording)
 
         # make figure for saturation events
+        saturation_status = status_pending
         if len(pos_evts) > 0 and len(neg_evts) > 0:
+            nrows = min(num_saturation_events_to_plot, max(len(pos_evts), len(neg_evts)))
             fig_sat, axs_sat = _get_fig_axs(ncols=2, nrows=num_saturation_events_to_plot)
             pos_ax_col = 0
             neg_ax_col = 1
         elif len(pos_evts) > 0:
-            fig_sat, axs_sat = _get_fig_axs(ncols=1, nrows=num_saturation_events_to_plot)
+            fig_sat, axs_sat = _get_fig_axs(ncols=1, nrows=min(num_saturation_events_to_plot, len(pos_evts)))
             pos_ax_col = 0
         elif len(neg_evts) > 0:
-            fig_sat, axs_sat = _get_fig_axs(ncols=1, nrows=num_saturation_events_to_plot, figsize=(5, 5))
+            fig_sat, axs_sat = _get_fig_axs(ncols=1, nrows=min(num_saturation_events_to_plot, len(neg_evts)))
             neg_ax_col = 0
         else:
-            logging.info(f"\tNo saturation events found for {recording_name}")
             fig_sat, ax_sat = _get_fig_axs(1, 1)
-            ax_sat.axis("off")
+            ax_sat[0, 0].axis("off")
+            saturation_status = status_pass
 
         if len(pos_evts) > 0:
-            logging.info(f"Found {len(pos_evts)} positive saturation events!")
+            logging.info(f"\tFound {len(pos_evts)} positive saturation events!")
             random_saturation_events = pos_evts[
                 np.random.choice(np.arange(len(pos_evts)), size=num_saturation_events_to_plot, replace=False)
             ]
@@ -717,15 +723,20 @@ def generate_event_qc(
                     clim=(-clim, clim),
                     ax=ax,
                 )
-                ax.set_xticks(np.round([t0 - t_cutout_saturation_s, t0, t0 + t_cutout_saturation_s], 3))
+                ax.set_xticks([t0 - t_cutout_saturation_s, t0, t0 + t_cutout_saturation_s])
+                ax.set_xticklabels([- t_cutout_saturation_s * 1000, 0, t_cutout_saturation_s  * 1000])
                 if i_r == 0:
-                    ax.set_title("Positive saturation events")
-            for missing_ax in np.arang(i_r, num_saturation_events_to_plot):
+                    ax.set_title(f"Positive\n@{np.round(t0, 2)}")
+                else:
+                    ax.set_title(f"@{np.round(t0, 2)}")
+                ax.set_ylabel("Depth ($\\mu m$)")
+            ax.set_xlabel("Time (ms)")
+            for missing_ax in np.arange(i_r + 1, num_saturation_events_to_plot):
                 axs_sat[missing_ax, pos_ax_col].axis("off")
         else:
-            logging.info("No positive saturation events found")
+            logging.info("\tNo positive saturation events found")
         if len(neg_evts) > 0:
-            logging.info(f"Found {len(neg_evts)} negative saturation events!")
+            logging.info(f"\tFound {len(neg_evts)} negative saturation events!")
             random_saturation_events = neg_evts[
                 np.random.choice(np.arange(len(neg_evts)), size=num_saturation_events_to_plot, replace=False)
             ]
@@ -739,58 +750,71 @@ def generate_event_qc(
                     clim=(-clim, clim),
                     ax=ax,
                 )
-                ax.set_xticks(np.round([t0 - t_cutout_saturation_s, t0, t0 + t_cutout_saturation_s], 3))
+                ax.set_xticks([t0 - t_cutout_saturation_s, t0, t0 + t_cutout_saturation_s])
+                ax.set_xticklabels([- t_cutout_saturation_s * 1000, 0, t_cutout_saturation_s * 1000])
                 if i_r == 0:
-                    ax.set_title("Negative saturation events")
-            for missing_ax in np.arang(i_r, num_saturation_events_to_plot):
-                axs_sat[missing_ax, pos_ax_col].axis("off")
+                    ax.set_title(f"Negative\n@{np.round(t0, 2)}")
+                else:
+                    ax.set_title(f"{np.round(t0, 2)}")
+                ax.set_ylabel("Depth ($\\mu m$)")
+
+            ax.set_xlabel("Time (ms)")
+            for missing_ax in np.arange(i_r + 1, num_saturation_events_to_plot):
+                axs_sat[missing_ax, neg_ax_col].axis("off")
         else:
-            logging.info("No negative saturation events found")
+            logging.info("\tNo negative saturation events found")
         fig_sat.suptitle(
-            f"Saturation events for {recording_name}:\nPositive: {len(pos_evts)} -- Negative: {len(neg_evts)}"
+            f"Saturation events:\nPositive: {len(pos_evts)} -- Negative: {len(neg_evts)}"
         )
+        if axs_sat.shape[1] == 1:
+            fig_sat.subplots_adjust(lsft=0.3, right=0.85, wspace=0.5, hspace=0.3)
+        else:
+            fig_sat.subplots_adjust(wspace=0.5, hspace=0.3)
         fig_sat_path = recording_fig_folder / "saturation_events.png"
         fig_sat.savefig(fig_sat_path, dpi=300)
         if relative_to is not None:
             fig_sat_path = fig_sat_path.relative_to(relative_to)
 
-        value_with_options = {
-            "value": "",
-            "options": ["Good", "Too many saturation events"],
-            "status": ["Pass", "Fail"],
-            "type": "dropdown",
-        }
+        if len(pos_evts) > 0 or len(neg_evts) > 0:
+            value_with_options = {
+                "value": "",
+                "options": ["Good", "Too many saturation events"],
+                "status": ["Pass", "Fail"],
+                "type": "dropdown",
+            }
+            saturation_status = status_pending
+        else:
+            value_with_options = {
+                "value": "Pass",
+            }
+            saturation_status = status_pass
 
         saturation_metric = QCMetric(
             name=f"Saturation events {recording_name}",
             description=f"Evaluation of {recording_name} saturation events",
             reference=str(fig_sat_path),
             value=value_with_options,
-            status_history=[status_pending],
+            status_history=[saturation_status],
         )
         metrics["Saturation"] = [saturation_metric]
 
-    logging.info("Generating TRIGGER EVENT metrics")
-    if harp_folder is None:
-        logging.info(f"\tNo HARP folder found for {recording_name}. Cannot generate event metrics.")
-    else:
-        event_json_files = [p for p in harp_folder.parent.iterdir() if p.suffix == ".json"]
-        if len(event_json_files) == 1:
-            logging.info("\tHARP event json file found!")
-            event_json_file = event_json_files[0]
-            with open(event_json_file) as f:
-                event_dict = json.load(f)
+    if event_dict is not None:
+        logging.info("Generating TRIGGER EVENT metrics")
 
         # make a sorting object with the events
         unit_dict = {}
         for k in event_dict.keys():
             if any(keyword in k.lower() for keyword in event_keys):
-                events = event_dict[k]
-                if len(events) > 0:
-                    sample_indices = recording.time_to_sample_index(event_dict[k])
+                events = np.array(event_dict[k])
+                events_in_range = events[events >= recording.get_times()[0]]
+                events_in_range = events_in_range[events_in_range < recording.get_times()[-1]]
+                if len(events_in_range) > 0:
+                    sample_indices = recording.time_to_sample_index(events_in_range)
                     unit_dict[k] = sample_indices
         if len(unit_dict) > 0:
-            logging.info(f"\tFound {len(unit_dict)} events: {list(unit_dict.keys())}")
+            logging.info(f"\tFound {len(unit_dict)} trigger event sources for {event_keys} keywords.")
+            for event_key, event_values in unit_dict.items():
+                logging.info(f"\t{event_key}: {len(event_values)} events")
             sorting_events = si.NumpySorting.from_unit_dict(
                 [unit_dict], sampling_frequency=recording.sampling_frequency
             )
@@ -807,6 +831,8 @@ def generate_event_qc(
             # create plots for each event
             fig_events, axs_events = _get_fig_axs(ncols=1, nrows=len(analyzer.unit_ids))
 
+            num_spikes = analyzer.sorting.count_num_spikes_per_unit()
+
             for unit_index, unit_id in enumerate(analyzer.unit_ids):
                 ax = axs_events[unit_index, 0]
                 # color by depth
@@ -822,19 +848,15 @@ def generate_event_qc(
                 for template, color in zip(templates[unit_index].T, colors):
                     ax.plot(times, template, color=color, alpha=0.3)
 
-                ax.set_title(unit_id)
+                ax.set_title(f"{unit_id} (#{num_spikes[unit_id]})")
                 ax.set_ylabel("Voltage ($\\mu V$)")
                 if unit_index == analyzer.get_num_units() - 1:
                     ax.set_xlabel("Time ($ms$)")
                 ax.spines[["top", "right"]].set_visible(False)
                 fig_events.colorbar(
-                    mpl.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax, orientation="vertical", label="Depth"
+                    mpl.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax, orientation="vertical", label="Depth ($\\mu m$)"
                 )
-            fig_events.subplots_adjust(hspace=0.3)
-            fig_events_path = recording_fig_folder / "trigger_events.png"
-            fig_events.savefig(fig_events_path, dpi=300)
-            if relative_to is not None:
-                fig_events_path = fig_events_path.relative_to(relative_to)
+            fig_events.subplots_adjust(hspace=0.3, left=0.3, right=0.85)
 
             value_with_options = {
                 "value": "",
@@ -842,17 +864,35 @@ def generate_event_qc(
                 "status": ["Pass", "Fail"],
                 "type": "dropdown",
             }
-
-            trigger_event_metric = QCMetric(
-                name=f"Trigger events {recording_name}",
-                description=f"Evaluation of {recording_name} trigger events",
-                reference=str(fig_events_path),
-                value=value_with_options,
-                status_history=[status_pending],
-            )
-            metrics["Trigger Events"] = [trigger_event_metric]
+            events_status = status_pending
         else:
             logging.info(f"\tNo events found for {recording_name}")
+
+            value_with_options = {
+                "value": "Pass",
+            }
+            events_status = status_pass
+
+            fig_events, ax_events = _get_fig_axs(1, 1)
+            ax_events[0, 0].axis("off")
+            fig_events.suptitle(
+                f"No trigger events found."
+            )
+            events_status = status_pass
+
+        fig_events_path = recording_fig_folder / "trigger_events.png"
+        fig_events.savefig(fig_events_path, dpi=300)
+        if relative_to is not None:
+            fig_events_path = fig_events_path.relative_to(relative_to)
+
+        trigger_event_metric = QCMetric(
+            name=f"Trigger events {recording_name}",
+            description=f"Evaluation of {recording_name} trigger events",
+            reference=str(fig_events_path),
+            value=value_with_options,
+            status_history=[events_status],
+        )
+        metrics["Trigger Events"] = [trigger_event_metric]
 
     return metrics
 
