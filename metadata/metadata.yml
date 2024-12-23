@@ -1,5 +1,8 @@
 metadata_version: 1
 name: Quality Control Ecephys
 description: Capsule to compute ephys QC.
+tags:
+- ecephys
+- quality control
 authors:
 - name: AIND

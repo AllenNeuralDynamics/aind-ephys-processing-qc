@@ -209,7 +209,7 @@ if __name__ == "__main__":
             recording_lfp = None
         recording_name = job_dict["recording_name"]
         session_name = job_dict["session_name"]
-        logging.info(f"Recording {recording_name}}")
+        logging.info(f"Recording {recording_name}")
         recording_preprocessed = None
         if ecephys_sorted_folder is not None:
             preprocessed_json_file = ecephys_sorted_folder / "preprocessed" / f"{recording_name}.json"
