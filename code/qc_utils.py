@@ -959,20 +959,24 @@ def generate_units_qc(
 
     fig_yield, axs_yield = plt.subplots(2, 3, figsize=(15, 10))
 
+    # protect against all NaNs
     bins = np.linspace(0, 2, 20)
     ax_isi = axs_yield[0, 0]
-    ax_isi.hist(quality_metrics["isi_violations_ratio"], bins=bins, density=True)
+    if not np.isnan(quality_metrics["isi_violations_ratio"]).all():
+        ax_isi.hist(quality_metrics["isi_violations_ratio"], bins=bins, density=True)
     ax_isi.set_xscale("log")
     ax_isi.set_title(f"ISI Violations Ratio")
     ax_isi.spines[["top", "right"]].set_visible(False)
 
     ax_amp_cutoff = axs_yield[0, 1]
-    ax_amp_cutoff.hist(quality_metrics["amplitude_cutoff"], bins=20, density=True)
+    if not np.isnan(quality_metrics["amplitude_cutoff"]).all():
+        ax_amp_cutoff.hist(quality_metrics["amplitude_cutoff"], bins=20, density=True)
     ax_amp_cutoff.set_title(f"Amplitude Cutoff")
     ax_amp_cutoff.spines[["top", "right"]].set_visible(False)
 
     ax_presence_ratio = axs_yield[0, 2]
-    ax_presence_ratio.hist(quality_metrics["presence_ratio"], bins=20, density=True)
+    if not np.isnan(quality_metrics["presence_ratio"]).all():
+        ax_presence_ratio.hist(quality_metrics["presence_ratio"], bins=20, density=True)
     ax_presence_ratio.set_title(f"Presence Ratio")
     ax_presence_ratio.spines[["top", "right"]].set_visible(False)
 
