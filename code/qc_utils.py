@@ -8,6 +8,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 from scipy.signal import welch, savgol_filter
 
 import spikeinterface as si
@@ -18,25 +19,40 @@ from aind_data_schema.core.processing import Processing
 from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status
 
 
+def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
+    figsize = (subplot_figsize[0] * ncols, subplot_figsize[1] * nrows)
+    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
+    if not isinstance(axs, np.ndarray):
+        axs = np.array([axs])[:, None]
+    elif nrows == 1:
+        axs = axs[None, :]
+    elif ncols == 1:
+        axs = axs[:, None]
+    return fig, axs
+
+
 def load_preprocessed_recording(preprocessed_json_file, session_name, ecephys_folder, data_folder):
     recording_preprocessed = None
-    try:
-        recording_preprocessed = si.load_extractor(preprocessed_json_file, base_folder=data_folder)
-    except Exception as e:
-        pass
-    if recording_preprocessed is None:
+    if preprocessed_json_file.is_file():
         try:
-            json_str = json.dumps(json.load(open(preprocessed_json_file)))
-            if "ecephys_session" in json_str:
-                json_str_remapped = json_str.replace("ecephys_session", ecephys_folder.name)
-            elif ecephys_folder.name != session_name and session_name in json_str:
-                json_str_remapped = json_str.replace(session_name, ecephys_folder.name)
-            recording_dict = json.loads(json_str_remapped)
-            recording_preprocessed = si.load_extractor(recording_dict, base_folder=data_folder)
-        except:
+            recording_preprocessed = si.load_extractor(preprocessed_json_file, base_folder=data_folder)
+        except Exception as e:
             pass
-    if recording_preprocessed is None:
-        logging.info(f"Error loading preprocessed data...")
+        if recording_preprocessed is None:
+            try:
+                json_str = json.dumps(json.load(open(preprocessed_json_file)))
+                if "ecephys_session" in json_str:
+                    json_str_remapped = json_str.replace("ecephys_session", ecephys_folder.name)
+                elif ecephys_folder.name != session_name and session_name in json_str:
+                    json_str_remapped = json_str.replace(session_name, ecephys_folder.name)
+                recording_dict = json.loads(json_str_remapped)
+                recording_preprocessed = si.load_extractor(recording_dict, base_folder=data_folder)
+            except:
+                pass
+        if recording_preprocessed is None:
+            logging.info(f"Error loading preprocessed data...")
+    else:
+        logging.info(f"Preprocessed recording not found...")
     return recording_preprocessed
 
 
@@ -54,18 +70,6 @@ def load_processing_metadata(processing_json):
             new_data_processes.append(dp)
     processing_dict["processing_pipeline"]["data_processes"] = new_data_processes
     return Processing(**processing_dict)
-
-
-def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
-    figsize = (subplot_figsize[0] * ncols, subplot_figsize[1] * nrows)
-    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
-    if not isinstance(axs, np.ndarray):
-        axs = np.array([axs])[:, None]
-    elif nrows == 1:
-        axs = axs[None, :]
-    elif ncols == 1:
-        axs = axs[:, None]
-    return fig, axs
 
 
 def plot_raw_data(
@@ -494,10 +498,17 @@ def generate_raw_qc(
                                 metric_values_str = f"{metric_name}: {metric_value}"
                             else:
                                 metric_values_str += f"\n{metric_name}: {metric_value}"
-                        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-                        ax_rms.text(0.2, 0.9, metric_values_str, transform=fig_rms.transFigure, fontsize=14,
-                                    verticalalignment='top', bbox=props)
-                        
+                        props = dict(boxstyle="round", facecolor="wheat", alpha=0.5)
+                        ax_rms.text(
+                            0.2,
+                            0.9,
+                            metric_values_str,
+                            transform=fig_rms.transFigure,
+                            fontsize=14,
+                            verticalalignment="top",
+                            bbox=props,
+                        )
+
         except:
             logging.info(f"Failed to load bad channel labels for {recording_name}")
 
@@ -568,9 +579,7 @@ def generate_drift_qc(
     motion = motion_info["motion"]
     spatial_bins = motion.spatial_bins_um
 
-    fig_drift, axs_drift = plt.subplots(
-        ncols=recording.get_num_segments(), figsize=(10,10)
-    )
+    fig_drift, axs_drift = plt.subplots(ncols=recording.get_num_segments(), figsize=(10, 10))
     y_locs = recording.get_channel_locations()[:, 1]
     sampling_frequency = recording.sampling_frequency
     depth_lim = [np.min(y_locs), np.max(y_locs)]
@@ -604,7 +613,7 @@ def generate_drift_qc(
 
         displacement_arr = motion.displacement[segment_index]
         temporal_bins = motion.temporal_bins_s[segment_index]
-        
+
         # calculate cumulative_drift and max displacement
         drift_ptps = np.ptp(displacement_arr, axis=0)
         cumulative_drifts = np.sum(displacement_arr, axis=0)
@@ -616,7 +625,7 @@ def generate_drift_qc(
         max_cumulative_drift = np.round(cumulative_drifts[max_cumulative_drift_index], 2)
         depth_at_max_cumulative_drift = int(spatial_bins[max_cumulative_drift_index])
 
-        ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color='red', alpha=0.5)
+        ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="red", alpha=0.5)
         ax_drift.set_title(
             f"Max displacement: {max_displacement} $\mu m$ (depth: {depth_at_max_displacement} ) $\\mu m$\n"
             f"Max cumulative drift: {max_cumulative_drift} $\mu m$ (depth: {depth_at_max_cumulative_drift} ) $\\mu m$\n"
@@ -644,6 +653,249 @@ def generate_drift_qc(
     drift_metrics = {"Drift": [drift_metric]}
 
     return drift_metrics
+
+
+def generate_event_qc(
+    recording: si.BaseRecording,
+    recording_name: str,
+    output_qc_path: Path,
+    relative_to: Path | None = None,
+    event_dict: dict | None = None,
+    event_keys: list[str] = ["licktime", "optogeneticstime"],
+    t_cutout_saturation_s: float = 0.002,
+    num_saturation_events_to_plot: int = 3,
+    **job_kwargs,
+):
+    """
+    Generate event metrics for a given recording.
+    The event metrics include saturation and responses to certain events.
+    """
+    recording_fig_folder = output_qc_path / recording_name
+    recording_fig_folder.mkdir(exist_ok=True, parents=True)
+    now = datetime.now()
+    status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
+    status_pass = QCStatus(evaluator="", status=Status.PASS, timestamp=now)
+
+    logging.info("Generating SATURATION metric")
+
+    part_number = recording.get_annotation("probes_info")[0].get("part_number")
+
+    metrics = {}
+    if part_number is None:
+        logging.info(f"\tNo part number found for {recording_name}. Cannot generate saturation metrics.")
+    else:
+        saturation_threshold_uv = saturation_thresholds_uv[part_number]
+        pos_evts, neg_evts = find_saturation_events(recording, saturation_threshold_uv, **job_kwargs)
+
+        clim = saturation_threshold_uv / 2
+        recording_ps = spre.phase_shift(recording)
+
+        # make figure for saturation events
+        saturation_status = status_pending
+        if len(pos_evts) > 0 and len(neg_evts) > 0:
+            nrows = min(num_saturation_events_to_plot, max(len(pos_evts), len(neg_evts)))
+            fig_sat, axs_sat = _get_fig_axs(ncols=2, nrows=num_saturation_events_to_plot)
+            pos_ax_col = 0
+            neg_ax_col = 1
+        elif len(pos_evts) > 0:
+            fig_sat, axs_sat = _get_fig_axs(ncols=1, nrows=min(num_saturation_events_to_plot, len(pos_evts)))
+            pos_ax_col = 0
+        elif len(neg_evts) > 0:
+            fig_sat, axs_sat = _get_fig_axs(ncols=1, nrows=min(num_saturation_events_to_plot, len(neg_evts)))
+            neg_ax_col = 0
+        else:
+            fig_sat, ax_sat = _get_fig_axs(1, 1)
+            ax_sat[0, 0].axis("off")
+            saturation_status = status_pass
+
+        if len(pos_evts) > 0:
+            logging.info(f"\tFound {len(pos_evts)} positive saturation events!")
+            random_saturation_events = pos_evts[
+                np.random.choice(np.arange(len(pos_evts)), size=num_saturation_events_to_plot, replace=False)
+            ]
+            random_saturation_events = random_saturation_events[np.argsort(random_saturation_events["sample_index"])]
+            for i_r, r in enumerate(random_saturation_events):
+                ax = axs_sat[i_r, pos_ax_col]
+                t0 = recording.sample_index_to_time(r["sample_index"])
+                w = sw.plot_traces(
+                    recording_ps,
+                    time_range=[t0 - t_cutout_saturation_s, t0 + t_cutout_saturation_s],
+                    clim=(-clim, clim),
+                    ax=ax,
+                )
+                ax.set_xticks([t0 - t_cutout_saturation_s, t0, t0 + t_cutout_saturation_s])
+                ax.set_xticklabels([- t_cutout_saturation_s * 1000, 0, t_cutout_saturation_s  * 1000])
+                if i_r == 0:
+                    ax.set_title(f"Positive\n@{np.round(t0, 2)}")
+                else:
+                    ax.set_title(f"@{np.round(t0, 2)}")
+                ax.set_ylabel("Depth ($\\mu m$)")
+            ax.set_xlabel("Time (ms)")
+            for missing_ax in np.arange(i_r + 1, num_saturation_events_to_plot):
+                axs_sat[missing_ax, pos_ax_col].axis("off")
+        else:
+            logging.info("\tNo positive saturation events found")
+        if len(neg_evts) > 0:
+            logging.info(f"\tFound {len(neg_evts)} negative saturation events!")
+            random_saturation_events = neg_evts[
+                np.random.choice(np.arange(len(neg_evts)), size=num_saturation_events_to_plot, replace=False)
+            ]
+            random_saturation_events = random_saturation_events[np.argsort(random_saturation_events["sample_index"])]
+            for i_r, r in enumerate(random_saturation_events):
+                ax = axs_sat[i_r, neg_ax_col]
+                t0 = recording.sample_index_to_time(r["sample_index"])
+                w = sw.plot_traces(
+                    recording_ps,
+                    time_range=[t0 - t_cutout_saturation_s, t0 + t_cutout_saturation_s],
+                    clim=(-clim, clim),
+                    ax=ax,
+                )
+                ax.set_xticks([t0 - t_cutout_saturation_s, t0, t0 + t_cutout_saturation_s])
+                ax.set_xticklabels([- t_cutout_saturation_s * 1000, 0, t_cutout_saturation_s * 1000])
+                if i_r == 0:
+                    ax.set_title(f"Negative\n@{np.round(t0, 2)}")
+                else:
+                    ax.set_title(f"{np.round(t0, 2)}")
+                ax.set_ylabel("Depth ($\\mu m$)")
+
+            ax.set_xlabel("Time (ms)")
+            for missing_ax in np.arange(i_r + 1, num_saturation_events_to_plot):
+                axs_sat[missing_ax, neg_ax_col].axis("off")
+        else:
+            logging.info("\tNo negative saturation events found")
+        fig_sat.suptitle(
+            f"Saturation events:\nPositive: {len(pos_evts)} -- Negative: {len(neg_evts)}"
+        )
+        if axs_sat.shape[1] == 1:
+            fig_sat.subplots_adjust(lsft=0.3, right=0.85, wspace=0.5, hspace=0.3)
+        else:
+            fig_sat.subplots_adjust(wspace=0.5, hspace=0.3)
+        fig_sat_path = recording_fig_folder / "saturation_events.png"
+        fig_sat.savefig(fig_sat_path, dpi=300)
+        if relative_to is not None:
+            fig_sat_path = fig_sat_path.relative_to(relative_to)
+
+        if len(pos_evts) > 0 or len(neg_evts) > 0:
+            value_with_options = {
+                "value": "",
+                "options": ["Good", "Too many saturation events"],
+                "status": ["Pass", "Fail"],
+                "type": "dropdown",
+            }
+            saturation_status = status_pending
+        else:
+            value_with_options = {
+                "value": "Pass",
+            }
+            saturation_status = status_pass
+
+        saturation_metric = QCMetric(
+            name=f"Saturation events {recording_name}",
+            description=f"Evaluation of {recording_name} saturation events",
+            reference=str(fig_sat_path),
+            value=value_with_options,
+            status_history=[saturation_status],
+        )
+        metrics["Saturation"] = [saturation_metric]
+
+    if event_dict is not None:
+        logging.info("Generating TRIGGER EVENT metrics")
+
+        # make a sorting object with the events
+        unit_dict = {}
+        for k in event_dict.keys():
+            if any(keyword in k.lower() for keyword in event_keys):
+                events = np.array(event_dict[k])
+                events_in_range = events[events >= recording.get_times()[0]]
+                events_in_range = events_in_range[events_in_range < recording.get_times()[-1]]
+                if len(events_in_range) > 0:
+                    sample_indices = recording.time_to_sample_index(events_in_range)
+                    unit_dict[k] = sample_indices
+        if len(unit_dict) > 0:
+            logging.info(f"\tFound {len(unit_dict)} trigger event sources for {event_keys} keywords.")
+            for event_key, event_values in unit_dict.items():
+                logging.info(f"\t{event_key}: {len(event_values)} events")
+            sorting_events = si.NumpySorting.from_unit_dict(
+                [unit_dict], sampling_frequency=recording.sampling_frequency
+            )
+            analyzer = si.create_sorting_analyzer(sorting_events, recording, sparse=False)
+
+            extensions = {
+                "random_spikes": {"method": "all"},
+                "templates": {"ms_before": 10, "ms_after": 10},
+            }
+            analyzer.compute(extensions, **job_kwargs)
+            template_ext = analyzer.get_extension("templates")
+            templates = template_ext.get_data()
+
+            # create plots for each event
+            fig_events, axs_events = _get_fig_axs(ncols=1, nrows=len(analyzer.unit_ids))
+
+            num_spikes = analyzer.sorting.count_num_spikes_per_unit()
+
+            for unit_index, unit_id in enumerate(analyzer.unit_ids):
+                ax = axs_events[unit_index, 0]
+                # color by depth
+                cmap = plt.get_cmap("viridis", analyzer.get_num_channels())
+                depths = analyzer.get_channel_locations()[:, 1]
+                norm = mpl.colors.Normalize(vmin=np.min(depths), vmax=np.max(depths))
+
+                colors = cmap(np.arange(analyzer.get_num_channels()))
+                times = np.linspace(
+                    -template_ext.params["ms_before"], template_ext.params["ms_after"], templates.shape[1]
+                )
+
+                for template, color in zip(templates[unit_index].T, colors):
+                    ax.plot(times, template, color=color, alpha=0.3)
+
+                ax.set_title(f"{unit_id} (#{num_spikes[unit_id]})")
+                ax.set_ylabel("Voltage ($\\mu V$)")
+                if unit_index == analyzer.get_num_units() - 1:
+                    ax.set_xlabel("Time ($ms$)")
+                ax.spines[["top", "right"]].set_visible(False)
+                fig_events.colorbar(
+                    mpl.cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax, orientation="vertical", label="Depth ($\\mu m$)"
+                )
+            fig_events.subplots_adjust(hspace=0.3, left=0.3, right=0.85)
+
+            value_with_options = {
+                "value": "",
+                "options": ["Good", "Trigger artifacts"],
+                "status": ["Pass", "Fail"],
+                "type": "dropdown",
+            }
+            events_status = status_pending
+        else:
+            logging.info(f"\tNo events found for {recording_name}")
+
+            value_with_options = {
+                "value": "Pass",
+            }
+            events_status = status_pass
+
+            fig_events, ax_events = _get_fig_axs(1, 1)
+            ax_events[0, 0].axis("off")
+            fig_events.suptitle(
+                f"No trigger events found."
+            )
+            events_status = status_pass
+
+        fig_events_path = recording_fig_folder / "trigger_events.png"
+        fig_events.savefig(fig_events_path, dpi=300)
+        if relative_to is not None:
+            fig_events_path = fig_events_path.relative_to(relative_to)
+
+        trigger_event_metric = QCMetric(
+            name=f"Trigger events {recording_name}",
+            description=f"Evaluation of {recording_name} trigger events",
+            reference=str(fig_events_path),
+            value=value_with_options,
+            status_history=[events_status],
+        )
+        metrics["Trigger Events"] = [trigger_event_metric]
+
+    return metrics
+
 
 def generate_units_qc(
     sorting_analyzer: si.SortingAnalyzer | None,
@@ -712,17 +964,17 @@ def generate_units_qc(
     ax_isi.hist(quality_metrics["isi_violations_ratio"], bins=bins, density=True)
     ax_isi.set_xscale("log")
     ax_isi.set_title(f"ISI Violations Ratio")
-    ax_isi.spines[["top", "right"]].set_visible(False) 
+    ax_isi.spines[["top", "right"]].set_visible(False)
 
     ax_amp_cutoff = axs_yield[0, 1]
     ax_amp_cutoff.hist(quality_metrics["amplitude_cutoff"], bins=20, density=True)
     ax_amp_cutoff.set_title(f"Amplitude Cutoff")
-    ax_amp_cutoff.spines[["top", "right"]].set_visible(False) 
+    ax_amp_cutoff.spines[["top", "right"]].set_visible(False)
 
     ax_presence_ratio = axs_yield[0, 2]
     ax_presence_ratio.hist(quality_metrics["presence_ratio"], bins=20, density=True)
     ax_presence_ratio.set_title(f"Presence Ratio")
-    ax_presence_ratio.spines[["top", "right"]].set_visible(False) 
+    ax_presence_ratio.spines[["top", "right"]].set_visible(False)
 
     channel_indices = np.array(
         list(si.get_template_extremum_channel(sorting_analyzer, mode="peak_to_peak", outputs="index").values())
@@ -745,14 +997,14 @@ def generate_units_qc(
     ax_amplitudes.set_xlabel("Amplitude ($\\mu V$)")
     ax_amplitudes.set_ylabel("Depth ($\\mu m$)")
     ax_amplitudes.legend()
-    ax_amplitudes.spines[["top", "right"]].set_visible(False) 
+    ax_amplitudes.spines[["top", "right"]].set_visible(False)
 
     ax_fr = axs_yield[1, 1]
     firing_rate = np.array(quality_metrics["firing_rate"].tolist())
     firing_rate[firing_rate > max_firing_rate_for_visualization] = max_firing_rate_for_visualization
     df_firing_rate_depths = pd.DataFrame({"firing_rate": firing_rate, "channel_depth": channel_depths})
     mean_firing_rate_by_depth = df_firing_rate_depths.groupby("channel_depth").mean()
-    
+
     for label in np.unique(decoder_label):
         mask = decoder_label == label
         ax_fr.scatter(firing_rate[mask], channel_depths[mask], c=colors[label], label=label, alpha=0.4)
@@ -763,7 +1015,7 @@ def generate_units_qc(
     ax_fr.set_xlabel("Firing rate (Hz)")
     ax_fr.set_ylabel("Depth ($\\mu m$)")
     ax_fr.legend()
-    ax_fr.spines[["top", "right"]].set_visible(False) 
+    ax_fr.spines[["top", "right"]].set_visible(False)
 
     ax_text = axs_yield[1, 2]
     ax_text.axis("off")
@@ -782,15 +1034,14 @@ def generate_units_qc(
             metric_values_str = f"{metric_name}: {metric_value}"
         else:
             metric_values_str += f"\n{metric_name}: {metric_value}"
-    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax_text.text(0, 1, metric_values_str, transform=ax_text.transAxes, fontsize=14,
-                 verticalalignment='top', bbox=props)
+    props = dict(boxstyle="round", facecolor="wheat", alpha=0.5)
+    ax_text.text(0, 1, metric_values_str, transform=ax_text.transAxes, fontsize=14, verticalalignment="top", bbox=props)
 
     fig_yield.suptitle("Unit Metrics Yield", fontsize=15)
     fig_yield.tight_layout()
     unit_yield_path = recording_fig_folder / "unit_yield.png"
     fig_yield.savefig(unit_yield_path, dpi=300)
-    
+
     if relative_to is not None:
         unit_yield_path = unit_yield_path.relative_to(relative_to)
 
@@ -870,3 +1121,97 @@ def generate_units_qc(
     metrics["Firing Rate"] = [firing_rate_metric]
 
     return metrics
+
+
+### EVENTS UTILS
+
+# saturation values for different NP probes
+saturation_thresholds_uv = {
+    "PRB_1_4_0480_1": 0.6 / 500 * 1e6,
+    "PRB_1_4_0480_1_C": 0.6 / 500 * 1e6,
+    "PRB_1_2_0480_2": 0.6 / 500 * 1e6,
+    "NP1010": 0.6 / 500 * 1e6,
+    # NHP probes
+    "NP1015": 0.6 / 500 * 1e6,
+    "NP1016": 0.6 / 500 * 1e6,
+    "NP1022": 0.6 / 500 * 1e6,
+    "NP1030": 0.6 / 500 * 1e6,
+    "NP1031": 0.6 / 500 * 1e6,
+    "NP1032": 0.6 / 500 * 1e6,
+    # NP2.0
+    "NP2000": 0.5 / 80 * 1e6,
+    "NP2010": 0.5 / 80 * 1e6,
+    "NP2013": 0.62 / 100 * 1e6,
+    "NP2014": 0.62 / 100 * 1e6,
+    "NP2003": 0.62 / 100 * 1e6,
+    "NP2004": 0.62 / 100 * 1e6,
+    "PRB2_1_2_0640_0": 0.5 / 80 * 1e6,
+    "PRB2_4_2_0640_0": 0.5 / 80 * 1e6,
+    # Other probes
+    "NP1100": 0.6 / 500 * 1e6,  # Ultra probe - 1 bank
+    "NP1110": 0.6 / 500 * 1e6,  # Ultra probe - 16 banks
+    "NP1121": 0.6 / 500 * 1e6,  # Ultra probe - beta configuration
+    "NP1300": 0.6 / 500 * 1e6,  # Opto probe
+}
+
+
+def find_saturation_events(
+    recording: si.BaseRecording,
+    saturation_threshold_uv: float,
+    exclude_sweep_ms: float = 1,
+    radius_um: float = 200,
+    **job_kwargs,
+):
+    """
+    Find saturation events in a recording.
+
+    Parameters
+    ----------
+    recording : BaseRecording
+        The recording object.
+    saturation_threshold_uv : float
+        The saturation threshold in microvolts.
+    exclude_sweep_ms : float, default: 1
+        The time in milliseconds to exclude around the saturation event.
+    radius_um : float, default: 200
+        The radius in micrometers to consider for saturation events.
+    job_kwargs : dict
+        The job kwargs.
+
+    Returns
+    -------
+    positive_saturation_events : np.ndarray
+        The positive saturation events.
+    negative_saturation_events : np.ndarray
+        The negative saturation events.
+    """
+    from spikeinterface.core.node_pipeline import run_node_pipeline
+    from spikeinterface.sortingcomponents.peak_detection import DetectPeakLocallyExclusive
+
+    channel_distance = si.get_channel_distances(recording)
+    neighbours_mask = channel_distance <= radius_um
+    num_channels = recording.get_num_channels()
+
+    # here we set absolute thresholds externally, since we know the saturation thresholds
+    saturation_both = DetectPeakLocallyExclusive(recording, noise_levels=np.ones(num_channels))
+    abs_thresholds = np.array([saturation_threshold_uv / recording.get_channel_gains()[0]] * num_channels)
+    saturation_both.args = ("both", abs_thresholds, exclude_sweep_ms, neighbours_mask)
+
+    job_name = f"finding saturation events"
+    squeeze_output = True
+    nodes = [saturation_both]
+    outs = run_node_pipeline(
+        recording,
+        nodes,
+        job_kwargs,
+        job_name=job_name,
+        squeeze_output=squeeze_output,
+    )
+
+    # only keep unique saturation events
+    outs = outs[np.unique(outs["sample_index"], return_index=True)[1]]
+
+    positive_saturation_events = outs[outs["amplitude"] > 0]
+    negative_saturation_events = outs[outs["amplitude"] < 0]
+
+    return positive_saturation_events, negative_saturation_events
