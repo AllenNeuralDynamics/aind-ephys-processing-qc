@@ -704,8 +704,8 @@ def generate_event_qc(
             fig_sat, axs_sat = _get_fig_axs(ncols=1, nrows=min(num_saturation_events_to_plot, len(neg_evts)))
             neg_ax_col = 0
         else:
-            fig_sat, ax_sat = _get_fig_axs(1, 1)
-            ax_sat[0, 0].axis("off")
+            fig_sat, axs_sat = _get_fig_axs(1, 1)
+            axs_sat[0, 0].axis("off")
             saturation_status = status_pass
 
         if len(pos_evts) > 0:
