@@ -767,7 +767,7 @@ def generate_event_qc(
             f"Saturation events:\nPositive: {len(pos_evts)} -- Negative: {len(neg_evts)}"
         )
         if axs_sat.shape[1] == 1:
-            fig_sat.subplots_adjust(lsft=0.3, right=0.85, wspace=0.5, hspace=0.3)
+            fig_sat.subplots_adjust(left=0.3, right=0.85, wspace=0.5, hspace=0.3)
         else:
             fig_sat.subplots_adjust(wspace=0.5, hspace=0.3)
         fig_sat_path = recording_fig_folder / "saturation_events.png"
