@@ -1,5 +1,6 @@
 """ Quality control for ecephys pipeline """
 
+import sys
 from pathlib import Path
 import shutil
 import json
@@ -79,11 +80,11 @@ if __name__ == "__main__":
 
         log.setup_logging(
             "Quality Control Ecephys",
-            mouse_id=subject_id,
-            session_name=session_name,
+            subject_id=subject_id,
+            asset_name=session_name,
         )
     else:
-        logging.basicConfig(level=logging.INFO, format="%(message)s")
+        logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
 
     logging.info("\nEPHYS QC")
 
