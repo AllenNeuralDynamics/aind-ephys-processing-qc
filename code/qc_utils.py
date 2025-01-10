@@ -694,7 +694,7 @@ def generate_event_qc(
         saturation_status = status_pending
         if len(pos_evts) > 0 and len(neg_evts) > 0:
             nrows = min(num_saturation_events_to_plot, max(len(pos_evts), len(neg_evts)))
-            fig_sat, axs_sat = _get_fig_axs(ncols=2, nrows=num_saturation_events_to_plot)
+            fig_sat, axs_sat = _get_fig_axs(ncols=2, nrows=nrows)
             pos_ax_col = 0
             neg_ax_col = 1
         elif len(pos_evts) > 0:
@@ -710,10 +710,13 @@ def generate_event_qc(
 
         if len(pos_evts) > 0:
             logging.info(f"\tFound {len(pos_evts)} positive saturation events!")
-            random_saturation_events = pos_evts[
-                np.random.choice(np.arange(len(pos_evts)), size=num_saturation_events_to_plot, replace=False)
-            ]
-            random_saturation_events = random_saturation_events[np.argsort(random_saturation_events["sample_index"])]
+            if len(pos_evts) > num_saturation_events_to_plot:
+                random_saturation_events = pos_evts[
+                    np.random.choice(np.arange(len(pos_evts)), size=num_saturation_events_to_plot, replace=False)
+                ]
+                random_saturation_events = random_saturation_events[np.argsort(random_saturation_events["sample_index"])]
+            else:
+                random_saturation_events = pos_evts
             for i_r, r in enumerate(random_saturation_events):
                 ax = axs_sat[i_r, pos_ax_col]
                 t0 = recording.sample_index_to_time(r["sample_index"])
@@ -737,10 +740,13 @@ def generate_event_qc(
             logging.info("\tNo positive saturation events found")
         if len(neg_evts) > 0:
             logging.info(f"\tFound {len(neg_evts)} negative saturation events!")
-            random_saturation_events = neg_evts[
-                np.random.choice(np.arange(len(neg_evts)), size=num_saturation_events_to_plot, replace=False)
-            ]
-            random_saturation_events = random_saturation_events[np.argsort(random_saturation_events["sample_index"])]
+            if len(neg_evts) > num_saturation_events_to_plot:
+                random_saturation_events = neg_evts[
+                    np.random.choice(np.arange(len(neg_evts)), size=num_saturation_events_to_plot, replace=False)
+                ]
+                random_saturation_events = random_saturation_events[np.argsort(random_saturation_events["sample_index"])]
+            else:
+                random_saturation_events = neg_evts
             for i_r, r in enumerate(random_saturation_events):
                 ax = axs_sat[i_r, neg_ax_col]
                 t0 = recording.sample_index_to_time(r["sample_index"])
