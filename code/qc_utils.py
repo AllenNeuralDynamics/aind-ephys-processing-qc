@@ -698,13 +698,16 @@ def generate_event_qc(
             pos_ax_col = 0
             neg_ax_col = 1
         elif len(pos_evts) > 0:
-            fig_sat, axs_sat = _get_fig_axs(ncols=1, nrows=min(num_saturation_events_to_plot, len(pos_evts)))
+            nrows = min(num_saturation_events_to_plot, len(pos_evts))
+            fig_sat, axs_sat = _get_fig_axs(ncols=1, nrows=nrows)
             pos_ax_col = 0
         elif len(neg_evts) > 0:
-            fig_sat, axs_sat = _get_fig_axs(ncols=1, nrows=min(num_saturation_events_to_plot, len(neg_evts)))
+            nrows = min(num_saturation_events_to_plot, len(neg_evts))
+            fig_sat, axs_sat = _get_fig_axs(ncols=1, nrows=nrows)
             neg_ax_col = 0
         else:
-            fig_sat, axs_sat = _get_fig_axs(1, 1)
+            nrows = 1
+            fig_sat, axs_sat = _get_fig_axs(ncols=1, nrows=1)
             axs_sat[0, 0].axis("off")
             saturation_status = status_pass
 
@@ -734,7 +737,7 @@ def generate_event_qc(
                     ax.set_title(f"@{np.round(t0, 2)}")
                 ax.set_ylabel("Depth ($\\mu m$)")
             ax.set_xlabel("Time (ms)")
-            for missing_ax in np.arange(i_r + 1, num_saturation_events_to_plot):
+            for missing_ax in np.arange(i_r + 1, nrows):
                 axs_sat[missing_ax, pos_ax_col].axis("off")
         else:
             logging.info("\tNo positive saturation events found")
@@ -765,7 +768,7 @@ def generate_event_qc(
                 ax.set_ylabel("Depth ($\\mu m$)")
 
             ax.set_xlabel("Time (ms)")
-            for missing_ax in np.arange(i_r + 1, num_saturation_events_to_plot):
+            for missing_ax in np.arange(i_r + 1, nrows):
                 axs_sat[missing_ax, neg_ax_col].axis("off")
         else:
             logging.info("\tNo negative saturation events found")
