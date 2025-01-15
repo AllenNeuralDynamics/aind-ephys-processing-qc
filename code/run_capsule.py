@@ -1,13 +1,13 @@
 """ Quality control for ecephys pipeline """
 
 import sys
-from pathlib import Path
 import shutil
 import json
 import numpy as np
-import argparse
 import time
 import logging
+from pathlib import Path
+
 
 import spikeinterface as si
 
@@ -34,25 +34,8 @@ data_folder = Path("../data")
 results_folder = Path("../results")
 
 
-# define argument parser
-parser = argparse.ArgumentParser(description="Generate Ephys QC data")
-
-copy_sorted_to_results_group = parser.add_mutually_exclusive_group()
-copy_sorted_to_results_help = "Whether to copy the sorted data to the results folder"
-copy_sorted_to_results_group.add_argument(
-    "--copy-sorted-to-results", action="store_true", help=copy_sorted_to_results_help
-)
-copy_sorted_to_results_group.add_argument(
-    "static_copy_sorted_to_results", nargs="?", default="false", help=copy_sorted_to_results_help
-)
-
-
-
 if __name__ == "__main__":
     t_qc_start_all = time.perf_counter()
-    args = parser.parse_args()
-
-    COPY_SORTED_TO_RESULTS = True if args.copy_sorted_to_results else args.static_copy_sorted_to_results == "true"
 
     # pipeline mode VS capsule mode
     ecephys_folders = [
@@ -100,7 +83,7 @@ if __name__ == "__main__":
     elif (data_folder / "preprocessed").is_dir():
         ecephys_sorted_folder = data_folder
     else:
-        ecephys_sorted_folder = None
+        raise FileNotFoundError("Sorted folder not found and required for Quality Control.")
 
     job_json_files = [p for p in data_folder.iterdir() if p.suffix == ".json" and "job" in p.name]
     job_dicts = []
@@ -194,9 +177,10 @@ if __name__ == "__main__":
         logging.info("Events from HARP not found. Trigger event metrics will not be generated.")
 
     # look for JSON files or loop through preprocessed
-    all_metrics_raw = {}
-    all_metrics_processed = {}
     for job_dict in job_dicts:
+        all_metrics_raw = {}
+        all_metrics_processed = {}
+
         recording_name = job_dict["recording_name"]
         recording = si.load_extractor(job_dict["recording_dict"], base_folder=data_folder)
         if job_dict["skip_times"]:
@@ -233,7 +217,7 @@ if __name__ == "__main__":
             if recording_preprocessed is not None and sorting_analyzer is not None:
                 sorting_analyzer.set_temporary_recording(recording_preprocessed)
 
-        quality_control_fig_folder = results_folder / "quality_control"
+        quality_control_fig_folder = results_folder / f"quality_control_{recording_name}"
 
         metrics_raw = generate_raw_qc(
             recording,
@@ -283,39 +267,33 @@ if __name__ == "__main__":
             else:
                 all_metrics_processed[evaluation_name] = metric_list
 
-    # generate evaluations
-    evaluations = []
+        # generate evaluations
+        evaluations = []
+        for evaluation_name, metrics in all_metrics_raw.items():
+            evaluation = QCEvaluation(
+                modality=Modality.ECEPHYS,
+                stage=Stage.RAW,
+                name=evaluation_name,
+                description=evaluation_name,
+                metrics=metrics,
+            )
+            evaluations.append(evaluation)
 
-    for evaluation_name, metrics in all_metrics_raw.items():
-        evaluation = QCEvaluation(
-            modality=Modality.ECEPHYS,
-            stage=Stage.RAW,
-            name=evaluation_name,
-            description=evaluation_name,
-            metrics=metrics,
-        )
-        evaluations.append(evaluation)
+        for evaluation_name, metrics in all_metrics_processed.items():
+            evaluation = QCEvaluation(
+                modality=Modality.ECEPHYS,
+                stage=Stage.PROCESSING,
+                name=evaluation_name,
+                description=evaluation_name,
+                metrics=metrics,
+            )
+            evaluations.append(evaluation)
 
-    for evaluation_name, metrics in all_metrics_processed.items():
-        evaluation = QCEvaluation(
-            modality=Modality.ECEPHYS,
-            stage=Stage.PROCESSING,
-            name=evaluation_name,
-            description=evaluation_name,
-            metrics=metrics,
-        )
-        evaluations.append(evaluation)
+        # make quality control
+        quality_control = QualityControl(evaluations=evaluations)
 
-    # make quality control
-    quality_control = QualityControl(evaluations=evaluations)
-
-    with (results_folder / "quality_control.json").open("w") as f:
-        f.write(quality_control.model_dump_json(indent=3))
-
-    if COPY_SORTED_TO_RESULTS:
-        shutil.copytree(ecephys_sorted_folder, results_folder, dirs_exist_ok=True)
-        (results_folder / "output").rename(results_folder / "output_spikesorting")
-        logging.info(f"Sorted data copied to results folder")
+        with (results_folder / f"quality_control_{recording_name}.json").open("w") as f:
+            f.write(quality_control.model_dump_json(indent=3))
 
     t_qc_end_all = time.perf_counter()
     elapsed_time_preprocessing_all = np.round(t_qc_end_all - t_qc_start_all, 2)
