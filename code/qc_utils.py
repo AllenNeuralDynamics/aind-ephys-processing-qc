@@ -778,7 +778,7 @@ def generate_event_qc(
         if axs_sat.shape[1] == 1:
             fig_sat_samples.subplots_adjust(left=0.3, right=0.85, wspace=0.5, hspace=0.3)
         else:
-            fig_sat_samples.subplots_adjust(left=0.1, wspace=0.5, hspace=0.3)
+            fig_sat_samples.subplots_adjust(left=0.3, wspace=0.5, hspace=0.3)
 
         fig_sat_samples_path = recording_fig_folder / "saturation_samples.png"
         fig_sat_samples.savefig(fig_sat_samples_path, dpi=300)
