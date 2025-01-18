@@ -15,7 +15,7 @@ The following metrics are computed:
 - **Drift**: raster map and estimated drift
 - **Saturation**: how many positive/negative saturation events and trace snippets around them
 - **Event triggers**: average response to selected HARP events (defaults: licks and optogenetics stimulation). This metric needs HARP behavior events.
-- **Unit Yield**: distrubution of ISI violation ratios, amplitude cutoff, presence ratio, unit depths, amplitudes, firing rate and their classification (SUA, MUA, noise)
+- **Unit Yield**: distribution of ISI violation ratios, amplitude cutoff, presence ratio, unit depths, amplitudes, firing rate and their classification (SUA, MUA, noise)
 - **Firing rate**: population firing rate over the session (to detect seizure-like or drops in activity)
 
 
