@@ -379,7 +379,7 @@ def generate_raw_qc(
         The quality control metrics.
     """
     metrics = {}
-    recording_fig_folder = output_qc_path / recording_name
+    recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
     now = datetime.now()
     status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
@@ -565,7 +565,7 @@ def generate_drift_qc(
 
     logging.info("Generating DRIFT metric")
 
-    recording_fig_folder = output_qc_path / recording_name
+    recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(parents=True, exist_ok=True)
 
     # open displacement arrays
@@ -670,7 +670,7 @@ def generate_event_qc(
     Generate event metrics for a given recording.
     The event metrics include saturation and responses to certain events.
     """
-    recording_fig_folder = output_qc_path / recording_name
+    recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
     now = datetime.now()
     status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
@@ -694,20 +694,20 @@ def generate_event_qc(
         saturation_status = status_pending
         if len(pos_evts) > 0 and len(neg_evts) > 0:
             nrows = min(num_saturation_events_to_plot, max(len(pos_evts), len(neg_evts)))
-            fig_sat, axs_sat = _get_fig_axs(ncols=2, nrows=nrows)
+            fig_sat_samples, axs_sat = _get_fig_axs(ncols=2, nrows=nrows)
             pos_ax_col = 0
             neg_ax_col = 1
         elif len(pos_evts) > 0:
             nrows = min(num_saturation_events_to_plot, len(pos_evts))
-            fig_sat, axs_sat = _get_fig_axs(ncols=1, nrows=nrows)
+            fig_sat_samples, axs_sat = _get_fig_axs(ncols=1, nrows=nrows)
             pos_ax_col = 0
         elif len(neg_evts) > 0:
             nrows = min(num_saturation_events_to_plot, len(neg_evts))
-            fig_sat, axs_sat = _get_fig_axs(ncols=1, nrows=nrows)
+            fig_sat_samples, axs_sat = _get_fig_axs(ncols=1, nrows=nrows)
             neg_ax_col = 0
         else:
             nrows = 1
-            fig_sat, axs_sat = _get_fig_axs(ncols=1, nrows=1)
+            fig_sat_samples, axs_sat = _get_fig_axs(ncols=1, nrows=1)
             axs_sat[0, 0].axis("off")
             saturation_status = status_pass
 
@@ -772,17 +772,53 @@ def generate_event_qc(
                 axs_sat[missing_ax, neg_ax_col].axis("off")
         else:
             logging.info("\tNo negative saturation events found")
-        fig_sat.suptitle(
+        fig_sat_samples.suptitle(
             f"Saturation events:\nPositive: {len(pos_evts)} -- Negative: {len(neg_evts)}"
         )
         if axs_sat.shape[1] == 1:
-            fig_sat.subplots_adjust(left=0.3, right=0.85, wspace=0.5, hspace=0.3)
+            fig_sat_samples.subplots_adjust(left=0.3, right=0.85, wspace=0.5, hspace=0.3)
         else:
-            fig_sat.subplots_adjust(wspace=0.5, hspace=0.3)
-        fig_sat_path = recording_fig_folder / "saturation_events.png"
-        fig_sat.savefig(fig_sat_path, dpi=300)
+            fig_sat_samples.subplots_adjust(left=0.3, wspace=0.5, hspace=0.3)
+
+        fig_sat_samples_path = recording_fig_folder / "saturation_samples.png"
+        fig_sat_samples.savefig(fig_sat_samples_path, dpi=300)
         if relative_to is not None:
-            fig_sat_path = fig_sat_path.relative_to(relative_to)
+            fig_sat_samples_path = fig_sat_samples_path.relative_to(relative_to)
+
+        saturation_samples_metric = QCMetric(
+            name=f"Saturation events samples {recording_name}",
+            description=f"Evaluation of {recording_name} saturation samples",
+            reference=str(fig_sat_samples_path),
+            value={"value": "Pass"},
+            status_history=[status_pass],
+        )
+
+        # saturation events timeline
+        fig_sat_time, ax_sat_time = plt.subplots(figsize=(15, 10))
+        ax_sat_time.ticklabel_format(useOffset=False, style='plain', axis='x')
+
+        ax_sat_time.set_title(
+            f"Saturation events:\nPositive: {len(pos_evts)} -- Negative: {len(neg_evts)}"
+        )
+        if len(pos_evts) > 0:
+            pos_evt_times = recording.get_times()[pos_evts["sample_index"]]
+            ax_sat_time.plot(pos_evt_times, np.ones_like(pos_evt_times), ls="", marker="|", markersize=20, color="r", label="positive")
+        if len(neg_evts) > 0:
+            neg_evt_times = recording.get_times()[neg_evts["sample_index"]]
+            ax_sat_time.plot(neg_evt_times, -np.ones_like(neg_evt_times), ls="", marker="|", markersize=20, color="b", label="negative")
+        ax_sat_time.legend()
+        ax_sat_time.set_xlabel("Time (s)")
+        ax_sat_time.set_ylabel("Sign")
+        ax_sat_time.set_yticks([-1, +1])
+        ax_sat_time.set_yticklabels(["-", "+"])
+        ax_sat_time.set_ylim(-2, 2)
+        ax_sat_time.spines[["top", "right"]].set_visible(False)
+        ax_sat_time.get_xaxis().get_major_formatter().set_scientific(False)
+
+        fig_sat_time_path = recording_fig_folder / "saturation_timeline.png"
+        fig_sat_time.savefig(fig_sat_time_path, dpi=300)
+        if relative_to is not None:
+            fig_sat_time_path = fig_sat_time_path.relative_to(relative_to)
 
         if len(pos_evts) > 0 or len(neg_evts) > 0:
             value_with_options = {
@@ -793,19 +829,18 @@ def generate_event_qc(
             }
             saturation_status = status_pending
         else:
-            value_with_options = {
-                "value": "Pass",
-            }
+            value_with_options = {"value": "Pass"}
             saturation_status = status_pass
 
-        saturation_metric = QCMetric(
-            name=f"Saturation events {recording_name}",
-            description=f"Evaluation of {recording_name} saturation events",
-            reference=str(fig_sat_path),
-            value=value_with_options,
+        saturation_timeline_metric = QCMetric(
+            name=f"Saturation events timeline {recording_name}",
+            description=f"Evaluation of {recording_name} saturation timeline",
+            reference=str(fig_sat_time_path),
+            value={"value": "Pass"},
             status_history=[saturation_status],
         )
-        metrics["Saturation"] = [saturation_metric]
+
+        metrics["Saturation"] = [saturation_timeline_metric, saturation_samples_metric]
 
     if event_dict is not None:
         logging.info("Generating TRIGGER EVENT metrics")
@@ -944,7 +979,7 @@ def generate_units_qc(
         The quality control metrics.
     """
     metrics = {}
-    recording_fig_folder = output_qc_path / recording_name
+    recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
     now = datetime.now()
     status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
@@ -1106,11 +1141,11 @@ def generate_units_qc(
         spike_times_hist, bin_edges = np.histogram(spike_times, bins=num_bins)
         bin_centers = bin_edges[:-1] + bin_duration_hist_s / 2
         axs_fr[segment_index, 0].plot(bin_centers, spike_times_hist)
-
         axs_fr[segment_index, 0].set_title(f"Population firing rate")
         axs_fr[segment_index, 0].set_xlabel("Time (s)")
         axs_fr[segment_index, 0].set_ylabel("Firing rate (Hz)")
         axs_fr[segment_index, 0].spines[["top", "right"]].set_visible(False)
+        axs_fr[segment_index, 0].ticklabel_format(useOffset=False, style='plain', axis='x')
 
     fig_fr.tight_layout()
     firing_rate_path = recording_fig_folder / "firing_rate.png"
