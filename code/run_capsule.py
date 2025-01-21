@@ -296,6 +296,6 @@ if __name__ == "__main__":
             f.write(quality_control.model_dump_json(indent=3))
 
     t_qc_end_all = time.perf_counter()
-    elapsed_time_preprocessing_all = np.round(t_qc_end_all - t_qc_start_all, 2)
+    elapsed_time_qc_all = np.round(t_qc_end_all - t_qc_start_all, 2)
 
-    logging.info(f"EPHYS QC time: {elapsed_time_preprocessing_all}s")
+    logging.info(f"EPHYS QC time: {elapsed_time_qc_all}s")
