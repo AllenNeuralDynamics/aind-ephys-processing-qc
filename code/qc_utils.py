@@ -836,7 +836,7 @@ def generate_event_qc(
             name=f"Saturation events timeline {recording_name}",
             description=f"Evaluation of {recording_name} saturation timeline",
             reference=str(fig_sat_time_path),
-            value={"value": "Pass"},
+            value=value_with_options,
             status_history=[saturation_status],
         )
 
