@@ -616,7 +616,8 @@ def generate_drift_qc(
 
         # calculate cumulative_drift and max displacement
         drift_ptps = np.ptp(displacement_arr, axis=0)
-        cumulative_drifts = np.sum(displacement_arr, axis=0)
+        displacements_diff_arr = np.diff(displacement_arr, axis=0)
+        cumulative_drifts = np.sum(displacements_diff_arr, axis=0)
         max_displacement_index = np.argmax(drift_ptps)
         max_displacement = np.round(drift_ptps[max_displacement_index], 2)
         depth_at_max_displacement = int(spatial_bins[max_displacement_index])
