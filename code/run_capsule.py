@@ -83,7 +83,10 @@ if __name__ == "__main__":
     elif (data_folder / "preprocessed").is_dir():
         ecephys_sorted_folder = data_folder
     else:
-        raise FileNotFoundError("Sorted folder not found and required for Quality Control.")
+        logging.info(
+            "Sorted folder not found and required for Processed Evaluations. "
+            "Only Raw evaluations will be computed"
+        )
 
     job_json_files = [p for p in data_folder.iterdir() if p.suffix == ".json" and "job" in p.name]
     job_dicts = []
@@ -151,16 +154,18 @@ if __name__ == "__main__":
                     job_dicts.append(job_dict)
         logging.info(f"Found {len(job_dicts)} recordings")
 
-    processing_json_file = ecephys_sorted_folder / "processing.json"
     processing = None
-    if processing_json_file.is_file():
-        processing = load_processing_metadata(processing_json_file)
-
-    visualization_json_file = ecephys_sorted_folder / "visualization_output.json"
     visualization_output = None
-    if visualization_json_file.is_file():
-        with open(visualization_json_file) as f:
-            visualization_output = json.load(f)
+
+    if ecephys_sorted_folder is not None:
+        processing_json_file = ecephys_sorted_folder / "processing.json"
+        if processing_json_file.is_file():
+            processing = load_processing_metadata(processing_json_file)
+
+        visualization_json_file = ecephys_sorted_folder / "visualization_output.json"
+        if visualization_json_file.is_file():
+            with open(visualization_json_file) as f:
+                visualization_output = json.load(f)
 
     harp_folder = [p for p in (ecephys_folder / "behavior").glob("**/raw.harp")]
     event_dict = None
@@ -230,13 +235,6 @@ if __name__ == "__main__":
             visualization_output=visualization_output,
         )
 
-        motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
-
-        metrics_drift = generate_drift_qc(
-            recording, recording_name, motion_path, quality_control_fig_folder, relative_to=results_folder
-        )
-        metrics_raw.update(metrics_drift)
-
         metrics_event = generate_event_qc(
             recording,
             recording_name,
@@ -246,6 +244,14 @@ if __name__ == "__main__":
             event_keys=["licktime", "optogeneticstime"],
         )
         metrics_raw.update(metrics_event)
+
+        if ecephys_sorted_folder is not None:
+            motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
+
+            metrics_drift = generate_drift_qc(
+                recording, recording_name, motion_path, quality_control_fig_folder, relative_to=results_folder
+            )
+            metrics_raw.update(metrics_drift)
 
         for evaluation_name, metric_list in metrics_raw.items():
             if evaluation_name in all_metrics_raw:
