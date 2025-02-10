@@ -1,17 +1,25 @@
 {
 	"version": 1,
-	"base_image": "codeocean/jupyterlab:3.6.1-miniconda4.12.0-python3.9-ubuntu20.04",
+	"base_image": "codeocean/mambaforge3:23.1.0-4-python3.10.12-ubuntu22.04",
 	"args": [
 		"AWS_ACCESS_KEY_ID",
 		"AWS_DEFAULT_REGION",
 		"AWS_SECRET_ACCESS_KEY"
 	],
-	"post_install": true,
 	"options": {
 		"registry_host_arg": true,
 		"git_ask_pass": true
 	},
 	"installers": {
+		"apt": {
+			"packages": [
+				{
+					"name": "build-essential",
+					"version": "12.9ubuntu3"
+				}
+			],
+			"install_software_properties_common": true
+		},
 		"pip": {
 			"packages": [
 				{
@@ -24,15 +32,15 @@
 				},
 				{
 					"name": "aind-qcportal-schema",
-					"version": "0.1.1"
+					"version": "0.4.0"
 				},
 				{
 					"name": "spikeinterface[full,widgets]",
-					"version": "0.101.2"
+					"version": "0.102.0"
 				},
 				{
 					"name": "wavpack-numcodecs",
-					"version": "0.2.1"
+					"version": "0.2.2"
 				}
 			],
 			"options": {},
