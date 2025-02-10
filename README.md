@@ -16,8 +16,8 @@ The following metrics are computed:
 - **Saturation**: how many positive/negative saturation events and trace snippets around them
 - **Event triggers**: average response to selected HARP events (defaults: licks and optogenetics stimulation). This metric needs HARP behavior events.
 - **Unit Yield**: distribution of ISI violation ratios, amplitude cutoff, presence ratio, unit depths, amplitudes, firing rate and their classification (SUA, MUA, noise)
-- **Firing rate**: population firing rate over the session (to detect seizure-like or drops in activity)
-
+- **Firing Rate**: population firing rate over the session (to detect seizure-like or drops in activity)
+- **Sorting Curation**: metric for interactive curation with *SortingView* in the QC App.
 
 ### Inputs
 

@@ -17,6 +17,7 @@ import spikeinterface.widgets as sw
 
 from aind_data_schema.core.processing import Processing
 from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status
+from aind_qcportal_schema.metric_value import CurationMetric
 
 
 def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
@@ -1094,6 +1095,7 @@ def generate_units_qc(
     if relative_to is not None:
         unit_yield_path = unit_yield_path.relative_to(relative_to)
 
+    sorting_summary_link = None
     if visualization_output is not None:
         if recording_name in visualization_output:
             sorting_summary_link = visualization_output[recording_name].get("sorting_summary")
@@ -1117,6 +1119,19 @@ def generate_units_qc(
         status_history=[status_pending],
     )
     metrics["Unit Yield"] = [yield_metric]
+
+    logging.info("Generating SORTING CURATION metric")
+    if sorting_summary_link is not None:
+        gh_uri_str = sorting_summary_link[sorting_summary_link.find("&s="):sorting_summary_link.find("}&")+1]
+        sorting_summary_link_no_gh = sorting_summary_link.replace(gh_uri_str, "")
+        sorting_curation_metric = QCMetric(
+            name=f"Sorting Curation - {recording_name}",
+            description=f"Sorting Curation for {recording_name}",
+            reference=sorting_summary_link_no_gh,
+            value=CurationMetric(),
+            status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)]
+        )
+        metrics["Sorting Curation"] = [sorting_curation_metric]
 
     logging.info("Generating FIRING RATE metric")
     num_segments = sorting_analyzer.get_num_segments()
