@@ -1037,9 +1037,12 @@ def generate_units_qc(
 
     colors = {"sua": "green", "mua": "orange", "noise": "red"}
     ax_amplitudes = axs_yield[1, 0]
-    for label in np.unique(decoder_label):
-        mask = decoder_label == label
-        ax_amplitudes.scatter(amplitudes[mask], channel_depths[mask], c=colors[label], label=label, alpha=0.4)
+    if decoder_label is not None:
+        for label in np.unique(decoder_label):
+            mask = decoder_label == label
+            ax_amplitudes.scatter(amplitudes[mask], channel_depths[mask], c=colors[label], label=label, alpha=0.4)
+    else:
+        ax_amplitudes.scatter(amplitudes, channel_depths, alpha=0.4)
 
     smoothed_amplitude = savgol_filter(mean_amplitude_by_depth["amplitude"], 10, 2)
     ax_amplitudes.plot(smoothed_amplitude, mean_amplitude_by_depth.index.tolist(), c="r")
@@ -1055,9 +1058,12 @@ def generate_units_qc(
     df_firing_rate_depths = pd.DataFrame({"firing_rate": firing_rate, "channel_depth": channel_depths})
     mean_firing_rate_by_depth = df_firing_rate_depths.groupby("channel_depth").mean()
 
-    for label in np.unique(decoder_label):
-        mask = decoder_label == label
-        ax_fr.scatter(firing_rate[mask], channel_depths[mask], c=colors[label], label=label, alpha=0.4)
+    if decoder_label is not None:
+        for label in np.unique(decoder_label):
+            mask = decoder_label == label
+            ax_fr.scatter(firing_rate[mask], channel_depths[mask], c=colors[label], label=label, alpha=0.4)
+    else:
+        ax_fr.scatter(firing_rate, channel_depths, alpha=0.4)
 
     smoothed_firing_rate = savgol_filter(mean_firing_rate_by_depth["firing_rate"], 10, 2)
     ax_fr.plot(smoothed_firing_rate, mean_firing_rate_by_depth.index.tolist(), c="r")
