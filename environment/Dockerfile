@@ -1,4 +1,4 @@
-# hash:sha256:3c5d0093c8aa045e629802002af7c467fa00fa45a3aa0a10ee0661d5aa7a3281
+# hash:sha256:381ed7cb606696c30ebe927d6616c793c9b6c34d171ac27d9af919ba1aca411d
 ARG REGISTRY_HOST
 FROM $REGISTRY_HOST/codeocean/mambaforge3:23.1.0-4-python3.10.12-ubuntu22.04
 
@@ -10,6 +10,11 @@ ARG AWS_SECRET_ACCESS_KEY
 ARG GIT_ASKPASS
 ARG GIT_ACCESS_TOKEN
 COPY git-askpass /
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential=12.9ubuntu3 \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN pip install -U --no-cache-dir \
     aind-data-schema==1.1.1 \
