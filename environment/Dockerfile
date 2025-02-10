@@ -1,6 +1,6 @@
-# hash:sha256:40c2a3b197387759534a12d55359fa1560a8dc639e2dff1c5161c50e01f61574
+# hash:sha256:3c5d0093c8aa045e629802002af7c467fa00fa45a3aa0a10ee0661d5aa7a3281
 ARG REGISTRY_HOST
-FROM $REGISTRY_HOST/codeocean/jupyterlab:3.6.1-miniconda4.12.0-python3.9-ubuntu20.04
+FROM $REGISTRY_HOST/codeocean/mambaforge3:23.1.0-4-python3.10.12-ubuntu22.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG AWS_ACCESS_KEY_ID
