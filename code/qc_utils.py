@@ -36,7 +36,7 @@ def load_preprocessed_recording(preprocessed_json_file, session_name, ecephys_fo
     recording_preprocessed = None
     if preprocessed_json_file.is_file():
         try:
-            recording_preprocessed = si.load_extractor(preprocessed_json_file, base_folder=data_folder)
+            recording_preprocessed = si.load(preprocessed_json_file, base_folder=data_folder)
         except Exception as e:
             pass
         if recording_preprocessed is None:
@@ -47,7 +47,7 @@ def load_preprocessed_recording(preprocessed_json_file, session_name, ecephys_fo
                 elif ecephys_folder.name != session_name and session_name in json_str:
                     json_str_remapped = json_str.replace(session_name, ecephys_folder.name)
                 recording_dict = json.loads(json_str_remapped)
-                recording_preprocessed = si.load_extractor(recording_dict, base_folder=data_folder)
+                recording_preprocessed = si.load(recording_dict, base_folder=data_folder)
             except:
                 pass
         if recording_preprocessed is None:

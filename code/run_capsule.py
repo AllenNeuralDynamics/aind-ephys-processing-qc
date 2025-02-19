@@ -187,13 +187,13 @@ if __name__ == "__main__":
         all_metrics_processed = {}
 
         recording_name = job_dict["recording_name"]
-        recording = si.load_extractor(job_dict["recording_dict"], base_folder=data_folder)
+        recording = si.load(job_dict["recording_dict"], base_folder=data_folder)
         if job_dict["skip_times"]:
             logging.info(f"Resetting times for {recording_name}")
             recording.reset_times()
         recording_lfp_dict = job_dict.get("recording_lfp_dict")
         if recording_lfp_dict is not None:
-            recording_lfp = si.load_extractor(recording_lfp_dict, base_folder=data_folder)
+            recording_lfp = si.load(recording_lfp_dict, base_folder=data_folder)
             if job_dict["skip_times"]:
                 recording_lfp.reset_times()
         else:
@@ -212,7 +212,7 @@ if __name__ == "__main__":
             postprocessed_folder_zarr = ecephys_sorted_folder / "postprocessed" / f"{recording_name}.zarr"
             postprocessed_folder = ecephys_sorted_folder / "postprocessed" / recording_name
             if postprocessed_folder_zarr.is_dir():
-                sorting_analyzer = si.load_sorting_analyzer(postprocessed_folder_zarr)
+                sorting_analyzer = si.load(postprocessed_folder_zarr)
             elif postprocessed_folder.is_dir():
                 # this is for legacy waveform extractor folders
                 sorting_analyzer = si.load_waveforms(postprocessed_folder, output="SortingAnalyzer")
