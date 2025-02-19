@@ -87,6 +87,7 @@ if __name__ == "__main__":
             "Sorted folder not found and required for Processed Evaluations. "
             "Only Raw evaluations will be computed"
         )
+        ecephys_sorted_folder = None
 
     job_json_files = [p for p in data_folder.iterdir() if p.suffix == ".json" and "job" in p.name]
     job_dicts = []
