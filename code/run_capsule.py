@@ -189,13 +189,14 @@ if __name__ == "__main__":
 
         recording_name = job_dict["recording_name"]
         recording = si.load(job_dict["recording_dict"], base_folder=data_folder)
-        if job_dict["skip_times"]:
+        skip_times = job_dict.get("skip_times", False)
+        if skip_times:
             logging.info(f"Resetting times for {recording_name}")
             recording.reset_times()
         recording_lfp_dict = job_dict.get("recording_lfp_dict")
         if recording_lfp_dict is not None:
             recording_lfp = si.load(recording_lfp_dict, base_folder=data_folder)
-            if job_dict["skip_times"]:
+            if skip_times:
                 recording_lfp.reset_times()
         else:
             recording_lfp = None
@@ -207,7 +208,7 @@ if __name__ == "__main__":
             recording_preprocessed = load_preprocessed_recording(
                 preprocessed_json_file, session_name, ecephys_folder, data_folder
             )
-            if recording_preprocessed is not None and job_dict["skip_times"]:
+            if recording_preprocessed is not None and skip_times:
                 recording_preprocessed.reset_times()
 
             postprocessed_folder_zarr = ecephys_sorted_folder / "postprocessed" / f"{recording_name}.zarr"
