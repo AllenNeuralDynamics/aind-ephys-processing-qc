@@ -204,6 +204,7 @@ if __name__ == "__main__":
         logging.info(f"Recording {recording_name}")
         recording_preprocessed = None
         if ecephys_sorted_folder is not None:
+            sorting_analyzer = None
             preprocessed_json_file = ecephys_sorted_folder / "preprocessed" / f"{recording_name}.json"
             recording_preprocessed = load_preprocessed_recording(
                 preprocessed_json_file, session_name, ecephys_folder, data_folder
@@ -218,8 +219,6 @@ if __name__ == "__main__":
             elif postprocessed_folder.is_dir():
                 # this is for legacy waveform extractor folders
                 sorting_analyzer = si.load_waveforms(postprocessed_folder, output="SortingAnalyzer")
-            else:
-                sorting_analyzer = None
 
             if recording_preprocessed is not None and sorting_analyzer is not None:
                 sorting_analyzer.set_temporary_recording(recording_preprocessed)
@@ -261,19 +260,20 @@ if __name__ == "__main__":
             else:
                 all_metrics_raw[evaluation_name] = metric_list
 
-        metrics_processed = generate_units_qc(
-            sorting_analyzer,
-            recording_name,
-            quality_control_fig_folder,
-            relative_to=results_folder,
-            visualization_output=visualization_output,
-        )
+        if ecephys_sorted_folder is not None:
+            metrics_processed = generate_units_qc(
+                sorting_analyzer,
+                recording_name,
+                quality_control_fig_folder,
+                relative_to=results_folder,
+                visualization_output=visualization_output,
+            )
 
-        for evaluation_name, metric_list in metrics_processed.items():
-            if evaluation_name in all_metrics_processed:
-                all_metrics_processed[evaluation_name].extend(metric_list)
-            else:
-                all_metrics_processed[evaluation_name] = metric_list
+            for evaluation_name, metric_list in metrics_processed.items():
+                if evaluation_name in all_metrics_processed:
+                    all_metrics_processed[evaluation_name].extend(metric_list)
+                else:
+                    all_metrics_processed[evaluation_name] = metric_list
 
         # generate evaluations
         evaluations = []
