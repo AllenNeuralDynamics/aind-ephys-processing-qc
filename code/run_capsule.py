@@ -224,7 +224,7 @@ if __name__ == "__main__":
                 sorting_analyzer.set_temporary_recording(recording_preprocessed)
 
         quality_control_fig_folder = results_folder / f"quality_control_{recording_name}"
-
+        
         metrics_raw = generate_raw_qc(
             recording,
             recording_name,
@@ -235,7 +235,7 @@ if __name__ == "__main__":
             processing=processing,
             visualization_output=visualization_output,
         )
-
+        
         metrics_event = generate_event_qc(
             recording,
             recording_name,
@@ -245,12 +245,12 @@ if __name__ == "__main__":
             event_keys=["licktime", "optogeneticstime"],
         )
         metrics_raw.update(metrics_event)
-
+        
         if ecephys_sorted_folder is not None:
             motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
 
             metrics_drift = generate_drift_qc(
-                recording, recording_name, motion_path, quality_control_fig_folder, relative_to=results_folder
+                recording, recording_name, motion_path, quality_control_fig_folder, relative_to=results_folder, processing=processing
             )
             metrics_raw.update(metrics_drift)
 
@@ -259,7 +259,7 @@ if __name__ == "__main__":
                 all_metrics_raw[evaluation_name].extend(metric_list)
             else:
                 all_metrics_raw[evaluation_name] = metric_list
-
+        
         if ecephys_sorted_folder is not None:
             metrics_processed = generate_units_qc(
                 sorting_analyzer,

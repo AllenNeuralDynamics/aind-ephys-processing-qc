@@ -543,6 +543,7 @@ def generate_drift_qc(
     motion_path: Path,
     output_qc_path: Path,
     relative_to: Path | None = None,
+    processing: Processing | None = None
 ) -> QCMetric:
     """
     Generate drift metrics for a given sorting result.
@@ -557,6 +558,8 @@ def generate_drift_qc(
         The path of the recording's motion folder.
     output_qc_path : Path
         The output path for the quality control.
+    processing : Processing | None, default: None
+        The processing metadata object.
 
     Returns
     -------
@@ -628,9 +631,45 @@ def generate_drift_qc(
         depth_at_max_cumulative_drift = int(spatial_bins[max_cumulative_drift_index])
 
         ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="red", alpha=0.5)
+
+    # Plot surface channel line
+    surface_channel_y_position = None
+    if processing is not None:
+        try:
+            data_processes = processing.processing_pipeline.data_processes
+            for data_process in data_processes:
+                params = data_process.parameters.model_dump()
+                outputs = data_process.outputs.model_dump()
+                if (
+                    data_process.name == "Ephys preprocessing"
+                    and params.get("recording_name") is not None
+                    and params.get("recording_name") == recording_name
+                ):
+                    channel_labels = np.array(outputs.get("channel_labels"))
+                    if channel_labels is not None:
+                        channel_ids_out = recording.channel_ids[channel_labels == 'out']
+
+                        if not channel_ids_out:
+                            logging.info(f"No out channels detected for {recording_name}")
+                        else:
+                            surface_channel_id = channel_ids_out[0]
+                            surface_channel_index = recording.channel_ids.tolist().index(surface_channel_id)
+                            surface_channel_y_position = y_loc[surface_channel_index]
+                            ax_drift.axhline(y=surface_channel_y_position, c='g')
+        except:
+            logging.info(f"Failed to load bad channel labels for {recording_name}")
+
+    if surface_channel_y_position is not None:
         ax_drift.set_title(
             f"Max displacement: {max_displacement} $\mu m$ (depth: {depth_at_max_displacement} ) $\\mu m$\n"
             f"Max cumulative drift: {max_cumulative_drift} $\mu m$ (depth: {depth_at_max_cumulative_drift} ) $\\mu m$\n"
+            f"Surface channel location (green line) at {y_position} $\\mu m$\n"
+        )
+    else:
+        ax_drift.set_title(
+            f"Max displacement: {max_displacement} $\mu m$ (depth: {depth_at_max_displacement} ) $\\mu m$\n"
+            f"Max cumulative drift: {max_cumulative_drift} $\mu m$ (depth: {depth_at_max_cumulative_drift} ) $\\mu m$\n"
+            f"No surface channel detected"
         )
 
     drift_map_path = recording_fig_folder / "drift_map.png"
@@ -1002,8 +1041,9 @@ def generate_units_qc(
     number_of_good_units = int(np.sum(default_qc == True))
 
     quality_metrics = sorting_analyzer.get_extension("quality_metrics").get_data()
+    template_metrics = sorting_analyzer.get_extension("template_metrics").get_data()
 
-    fig_yield, axs_yield = plt.subplots(2, 3, figsize=(15, 10))
+    fig_yield, axs_yield = plt.subplots(3, 3, figsize=(15, 10))
 
     # protect against all NaNs
     bins = np.linspace(0, 2, 20)
@@ -1026,6 +1066,24 @@ def generate_units_qc(
     ax_presence_ratio.set_title(f"Presence Ratio")
     ax_presence_ratio.spines[["top", "right"]].set_visible(False)
 
+    ax_drift = axs_yield[1, 0]
+    if not np.isnan(quality_metrics['drift_ptp']).all():
+        ax_drift.hist(quality_metrics['drift_ptp'], bins=bins, density=True)
+    ax_drift.set_title(f"Drift Peak to Peak")
+    ax_drift.spines[["top", "right"]].set_visible(False)
+
+    ax_snr = axs_yield[1, 1]
+    if not np.isnan(quality_metrics['snr']).all():
+        ax_snr.hist(quality_metrics['snr'], bins=bins, density=True)
+    ax_snr.set_title(f"SNR")
+    ax_snr.spines[["top", "right"]].set_visible(False)
+
+    ax_halfwidth = axs_yield[1, 2]
+    if not np.isnan(template_metrics['half_width']).all():
+        ax_halfwidth.hist(template_metrics['half_width'], bins=bins, density=True)
+    ax_halfwidth.set_title(f"Half Width")
+    ax_halfwidth.spines[["top", "right"]].set_visible(False)
+
     channel_indices = np.array(
         list(si.get_template_extremum_channel(sorting_analyzer, mode="peak_to_peak", outputs="index").values())
     )
@@ -1036,7 +1094,7 @@ def generate_units_qc(
     mean_amplitude_by_depth = df_amplitudes_depths.groupby("channel_depth").mean()
 
     colors = {"sua": "green", "mua": "orange", "noise": "red"}
-    ax_amplitudes = axs_yield[1, 0]
+    ax_amplitudes = axs_yield[2, 0]
     if decoder_label is not None:
         for label in np.unique(decoder_label):
             mask = decoder_label == label
@@ -1055,7 +1113,7 @@ def generate_units_qc(
     ax_amplitudes.legend()
     ax_amplitudes.spines[["top", "right"]].set_visible(False)
 
-    ax_fr = axs_yield[1, 1]
+    ax_fr = axs_yield[2, 1]
     firing_rate = np.array(quality_metrics["firing_rate"].tolist())
     firing_rate[firing_rate > max_firing_rate_for_visualization] = max_firing_rate_for_visualization
     df_firing_rate_depths = pd.DataFrame({"firing_rate": firing_rate, "channel_depth": channel_depths})
@@ -1079,7 +1137,7 @@ def generate_units_qc(
     ax_fr.legend()
     ax_fr.spines[["top", "right"]].set_visible(False)
 
-    ax_text = axs_yield[1, 2]
+    ax_text = axs_yield[2, 2]
     ax_text.axis("off")
 
     metric_values = {
@@ -1291,3 +1349,11 @@ def find_saturation_events(
     negative_saturation_events = outs[outs["amplitude"] < 0]
 
     return positive_saturation_events, negative_saturation_events
+
+if __name__ == '__main__':
+    motion_path = Path('/root/capsule/data/ecephys_764790_2024-12-19_16-11-34_sorted_2025-02-21_14-46-33/preprocessed/motion/experiment2_Record Node 103#Neuropix-PXI-100.ProbeA_recording1')
+    recording_name = 'experiment2_Record Node 103#Neuropix-PXI-100.ProbeA_recording1'
+    recording = si.load('/root/capsule/data/ecephys_764790_2024-12-19_16-11-34/ecephys/ecephys_compressed/experiment2_Record Node 103#Neuropix-PXI-100.ProbeA.zarr')
+    quality_control_fig_folder = Path(f"/results/quality_control_{recording_name}")
+    relative_to = Path("/results")
+    generate_drift_qc(recording, recording_name, motion_path, quality_control_fig_folder, relative_to=relative_to)
