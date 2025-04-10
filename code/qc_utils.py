@@ -19,6 +19,7 @@ from aind_data_schema.core.processing import Processing
 from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status
 from aind_qcportal_schema.metric_value import CurationMetric
 
+ISI_VISUAL_AREAS = ["VISp", "VISa", "VISal", "VISam", "VISl", "VISli", "VISpl", "VISpm", "VISpor", "VISrl", "VIS"]
 
 def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
     figsize = (subplot_figsize[0] * ncols, subplot_figsize[1] * nrows)
@@ -654,7 +655,7 @@ def generate_drift_qc(
                         else:
                             surface_channel_id = channel_ids_out[0]
                             surface_channel_index = recording.channel_ids.tolist().index(surface_channel_id)
-                            surface_channel_y_position = y_loc[surface_channel_index]
+                            surface_channel_y_position = y_locs[surface_channel_index]
                             ax_drift.axhline(y=surface_channel_y_position, c='g')
         except:
             logging.info(f"Failed to load bad channel labels for {recording_name}")
@@ -1068,13 +1069,13 @@ def generate_units_qc(
 
     ax_drift = axs_yield[1, 0]
     if not np.isnan(quality_metrics['drift_ptp']).all():
-        ax_drift.hist(quality_metrics['drift_ptp'], bins=bins, density=True)
+        ax_drift.hist(quality_metrics['drift_ptp'], bins=20, density=True)
     ax_drift.set_title(f"Drift Peak to Peak")
     ax_drift.spines[["top", "right"]].set_visible(False)
 
     ax_snr = axs_yield[1, 1]
     if not np.isnan(quality_metrics['snr']).all():
-        ax_snr.hist(quality_metrics['snr'], bins=bins, density=True)
+        ax_snr.hist(quality_metrics['snr'], bins=20, density=True)
     ax_snr.set_title(f"SNR")
     ax_snr.spines[["top", "right"]].set_visible(False)
 
@@ -1202,6 +1203,21 @@ def generate_units_qc(
             status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)]
         )
         metrics["Sorting Curation"] = [sorting_curation_metric]
+    
+    logging.info("Generating ISI VISUAL AREA LABEL metric")
+    value_with_options = {
+        "value": "",
+        "options": ISI_VISUAL_AREAS,
+        "status": ["Pass" for area in ISI_VISUAL_AREAS],
+        "type": "dropdown",
+    }
+    isi_visual_area_metric = QCMetric(
+        name=f"Manual annotation of ISI Visual Area Label - {recording_name}",
+        description=f"Manual annotation of visual area label based on ISI imaging for {recording_name}",
+        value=value_with_options,
+        status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)]
+    )
+    metrics["ISI Visual Area Label"] = [isi_visual_area_metric]
 
     logging.info("Generating FIRING RATE metric")
     num_segments = sorting_analyzer.get_num_segments()
