@@ -1081,7 +1081,7 @@ def generate_units_qc(
 
     ax_halfwidth = axs_yield[1, 2]
     if not np.isnan(template_metrics['half_width']).all():
-        ax_halfwidth.hist(template_metrics['half_width'], bins=bins, density=True)
+        ax_halfwidth.hist(template_metrics['half_width'], bins=20, density=True)
     ax_halfwidth.set_title(f"Half Width")
     ax_halfwidth.spines[["top", "right"]].set_visible(False)
 
