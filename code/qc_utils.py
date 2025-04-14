@@ -1365,11 +1365,3 @@ def find_saturation_events(
     negative_saturation_events = outs[outs["amplitude"] < 0]
 
     return positive_saturation_events, negative_saturation_events
-
-if __name__ == '__main__':
-    motion_path = Path('/root/capsule/data/ecephys_764790_2024-12-19_16-11-34_sorted_2025-02-21_14-46-33/preprocessed/motion/experiment2_Record Node 103#Neuropix-PXI-100.ProbeA_recording1')
-    recording_name = 'experiment2_Record Node 103#Neuropix-PXI-100.ProbeA_recording1'
-    recording = si.load('/root/capsule/data/ecephys_764790_2024-12-19_16-11-34/ecephys/ecephys_compressed/experiment2_Record Node 103#Neuropix-PXI-100.ProbeA.zarr')
-    quality_control_fig_folder = Path(f"/results/quality_control_{recording_name}")
-    relative_to = Path("/results")
-    generate_drift_qc(recording, recording_name, motion_path, quality_control_fig_folder, relative_to=relative_to)
