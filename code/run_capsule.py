@@ -174,8 +174,19 @@ if __name__ == "__main__":
         harp_folder = harp_folder[0]
         logging.info("Harp folder found")
         event_json_files = [p for p in harp_folder.parent.iterdir() if p.suffix == ".json"]
+        event_json_file = None
         if len(event_json_files) == 1:
             event_json_file = event_json_files[0]
+        elif len(event_json_files) > 1:
+            logging.info(f"Found {len(event_json_files)} JSON files in behavior folder. Determining behavior file by name")
+            # the JSON file should start with {subject_id}_{date}
+            if session_name != "undefined":
+                subject_date_str = "_".join(session_name.split("_")[1:-1])
+                for json_file in event_json_files:
+                    if json_file.name.startswith(subject_date_str):
+                        event_json_file = json_file
+                        break
+        if event_json_file is not None:
             with open(event_json_file) as f:
                 event_dict = json.load(f)
 
