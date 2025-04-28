@@ -250,7 +250,7 @@ if __name__ == "__main__":
             motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
 
             metrics_drift = generate_drift_qc(
-                recording, recording_name, motion_path, quality_control_fig_folder, relative_to=results_folder, processing=processing
+                recording, recording_name, motion_path, quality_control_fig_folder, relative_to=results_folder
             )
             metrics_raw.update(metrics_drift)
 
