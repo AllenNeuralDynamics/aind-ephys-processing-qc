@@ -1,4 +1,4 @@
-# hash:sha256:e781bbfe6e423ce0a8405fdc9b9ceeba423dce831c2bb64af157ebca3e837733
+# hash:sha256:261fab51da033577048877a8e9ffb541baa981b6df1e2bc5b611cf9736b4644d
 ARG REGISTRY_HOST
 FROM $REGISTRY_HOST/codeocean/mambaforge3:23.1.0-4-python3.10.12-ubuntu22.04
 
@@ -22,3 +22,6 @@ RUN pip install -U --no-cache-dir \
     aind-qcportal-schema==0.4.0 \
     spikeinterface[full,widgets]==0.102.1 \
     wavpack-numcodecs==0.2.2
+
+COPY postInstall /
+RUN /postInstall
