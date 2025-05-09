@@ -1,5 +1,6 @@
 """ Quality control for ecephys pipeline """
 
+import os
 import sys
 import shutil
 import json
@@ -71,7 +72,11 @@ if __name__ == "__main__":
 
     logging.info("\nEPHYS QC")
 
-    si.set_global_job_kwargs(n_jobs=-1, chunk_duration="1s")
+    # Use CO_CPUS env variable if available
+    N_JOBS_CO = os.getenv("CO_CPUS")
+    N_JOBS = int(N_JOBS_CO) if N_JOBS_CO is not None else -1
+
+    si.set_global_job_kwargs(n_jobs=N_JOBS, chunk_duration="1s")
 
     ecephys_sorted_folders = [
         p
