@@ -1223,6 +1223,8 @@ saturation_thresholds_uv = {
     "NP2004": 0.62 / 100 * 1e6,
     "PRB2_1_2_0640_0": 0.5 / 80 * 1e6,
     "PRB2_4_2_0640_0": 0.5 / 80 * 1e6,
+    # Quad Base (same as NP2)
+    "NP2020": 0.62 / 100 * 1e6,
     # Other probes
     "NP1100": 0.6 / 500 * 1e6,  # Ultra probe - 1 bank
     "NP1110": 0.6 / 500 * 1e6,  # Ultra probe - 16 banks
