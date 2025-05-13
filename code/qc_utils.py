@@ -681,12 +681,12 @@ def generate_event_qc(
     logging.info("Generating SATURATION metric")
 
     part_number = recording.get_annotation("probes_info")[0].get("part_number")
+    saturation_threshold_uv = saturation_thresholds_uv.get(part_number)
 
     metrics = {}
-    if part_number is None:
-        logging.info(f"\tNo part number found for {recording_name}. Cannot generate saturation metrics.")
+    if saturation_threshold_uv is None:
+        logging.info(f"\tSaturation threshold for {recording_name}. Cannot generate saturation metrics.")
     else:
-        saturation_threshold_uv = saturation_thresholds_uv[part_number]
         pos_evts, neg_evts = find_saturation_events(recording, saturation_threshold_uv, **job_kwargs)
 
         clim = saturation_threshold_uv / 2
