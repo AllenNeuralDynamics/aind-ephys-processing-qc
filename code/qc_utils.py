@@ -74,14 +74,14 @@ def load_processing_metadata(processing_json):
     return Processing(**processing_dict)
 
 
-def _get_surface_channel(recording: si.BaseRecording, recording_name: str, channel_labels: np.ndarray) -> int | None:
+def _get_surface_channel(recording: si.BaseRecording, channel_labels: np.ndarray) -> int | None:
     y_locs = recording.get_channel_locations()[:, 1]
     surface_channel_y_position = None
     if channel_labels is not None:
         channel_ids_out = recording.channel_ids[channel_labels == 'out']
 
-        if not channel_ids_out:
-           logging.info(f"No out channels detected for {recording_name}")
+        if len(channel_ids_out) == 0:
+           logging.info(f"No out channels detected")
         else:
             surface_channel_id = channel_ids_out[0]
             surface_channel_index = recording.channel_ids.tolist().index(surface_channel_id)
@@ -91,7 +91,6 @@ def _get_surface_channel(recording: si.BaseRecording, recording_name: str, chann
 
 def plot_raw_data(
     recording: si.BaseRecording,
-    recording_name: str,
     recording_lfp: si.BaseRecording | None = None,
     num_snippets_per_segment: int = 3,
     duration_s: float = 0.1,
@@ -106,8 +105,6 @@ def plot_raw_data(
     ----------
     recording : BaseRecording
         The recording object.
-    recording_name: str
-        The name of the recording 
     recording_lfp : BaseRecording | None
         The LFP recording object.
     num_snippets_per_segment: int, default: 3
@@ -133,7 +130,7 @@ def plot_raw_data(
     if recording_lfp is None:
         recording_lfp = spre.bandpass_filter(recording, freq_min=0.1, freq_max=freq_lfp)
     
-    surface_channel_y_position = _get_surface_channel(recording, recording_name, channel_labels)
+    surface_channel_y_position = _get_surface_channel(recording, channel_labels)
 
     for segment_index in range(num_segments):
         # evenly distribute t_starts across segments
@@ -190,7 +187,6 @@ def plot_raw_data(
 
 def plot_psd(
     recording: si.BaseRecording,
-    recording_name: str,
     recording_lfp: si.BaseRecording | None = None,
     num_snippets_per_segment: int = 3,
     duration_s: float = 1,
@@ -207,8 +203,6 @@ def plot_psd(
     ----------
     recording : BaseRecording
         The recording object.
-    recording_name: str
-        The name of the recording 
     num_snippets_per_segment: int, default: 3
         Number of snippets to plot for each segment.
     duration_s : float, default: 1
@@ -240,7 +234,7 @@ def plot_psd(
         recording_lfp = spre.bandpass_filter(recording_lfp, freq_min=0.1, freq_max=freq_lf_filt)
     depths = recording.get_channel_locations()[:, 1]
 
-    surface_channel_y_position = _get_surface_channel(recording, recording_name, channel_labels)
+    surface_channel_y_position = _get_surface_channel(recording, channel_labels)
 
     for segment_index in range(num_segments):
         # evenly distribute t_starts across segments
@@ -350,12 +344,12 @@ def plot_psd(
     return fig_psd, fig_psd_hf, fig_psd_lf
 
 
-def plot_rms_by_depth(recording, recording_name: str, recording_preprocessed=None, recording_lfp=None, channel_labels: np.ndarray | None = None):
+def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None, channel_labels: np.ndarray | None = None):
     """ """
     num_segments = recording.get_num_segments()
     fig_rms, ax_rms = plt.subplots(figsize=(5, 8))
 
-    surface_channel_y_position = _get_surface_channel(recording, recording_name, channel_labels)
+    surface_channel_y_position = _get_surface_channel(recording, channel_labels)
 
     if recording_lfp is None:
         # this means the recording is wide-band, so we apply an additional hp filter
@@ -450,7 +444,7 @@ def generate_raw_qc(
             logging.info(f"Failed to load bad channel labels for {recording_name}")
 
     logging.info("Generating RAW DATA metrics")
-    fig_raw = plot_raw_data(recording, recording_name, recording_lfp, channel_labels=channel_labels)
+    fig_raw = plot_raw_data(recording, recording_lfp, channel_labels=channel_labels)
     raw_traces_path = recording_fig_folder / "traces_raw.png"
     fig_raw.savefig(raw_traces_path, dpi=300)
     if relative_to is not None:
@@ -482,7 +476,7 @@ def generate_raw_qc(
     metrics["Raw Data"] = [raw_data_metric]
 
     logging.info("Generating PSD metrics")
-    fig_psd_wide, fig_psd_hf, fig_psd_lf = plot_psd(recording, recording_name, recording_lfp=recording_lfp, channel_labels=channel_labels)
+    fig_psd_wide, fig_psd_hf, fig_psd_lf = plot_psd(recording, recording_lfp=recording_lfp, channel_labels=channel_labels)
     psd_wide_path = recording_fig_folder / "psd_wide.png"
     psd_hf_path = recording_fig_folder / "psd_hf.png"
     psd_lf_path = recording_fig_folder / "psd_lf.png"
@@ -535,7 +529,7 @@ def generate_raw_qc(
     metrics["PSD"] = [psd_wide_metric, psd_hf_metric, psd_lf_metric]
 
     logging.info("Generating NOISE metrics")
-    fig_rms, ax_rms = plot_rms_by_depth(recording, recording_name, recording_preprocessed, channel_labels=channel_labels)
+    fig_rms, ax_rms = plot_rms_by_depth(recording, recording_preprocessed, channel_labels=channel_labels)
     # Bad channel detection out of brain, noisy, silent
     if channel_labels is not None:
         metric_values = {
