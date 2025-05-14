@@ -622,7 +622,6 @@ def generate_drift_qc(
     all_peaks = motion_info["peaks"]
     all_peak_locations = motion_info["peak_locations"]
     motion = motion_info["motion"]
-    spatial_bins = motion.spatial_bins_um
 
     fig_drift, axs_drift = plt.subplots(ncols=recording.get_num_segments(), figsize=(10, 10))
     y_locs = recording.get_channel_locations()[:, 1]
@@ -656,27 +655,30 @@ def generate_drift_qc(
         ax_drift.spines["top"].set_visible(False)
         ax_drift.spines["right"].set_visible(False)
 
-        displacement_arr = motion.displacement[segment_index]
-        temporal_bins = motion.temporal_bins_s[segment_index]
+        if motion is not None:
+            displacement_arr = motion.displacement[segment_index]
+            temporal_bins = motion.temporal_bins_s[segment_index]
+            spatial_bins = motion.spatial_bins_um
 
-        # calculate cumulative_drift and max displacement
-        drift_ptps = np.ptp(displacement_arr, axis=0)
-        displacements_diff_arr = np.diff(displacement_arr, axis=0)
-        cumulative_drifts = np.sum(displacements_diff_arr, axis=0)
-        max_displacement_index = np.argmax(drift_ptps)
-        max_displacement = np.round(drift_ptps[max_displacement_index], 2)
-        depth_at_max_displacement = int(spatial_bins[max_displacement_index])
+            # calculate cumulative_drift and max displacement
+            drift_ptps = np.ptp(displacement_arr, axis=0)
+            displacements_diff_arr = np.diff(displacement_arr, axis=0)
+            cumulative_drifts = np.sum(displacements_diff_arr, axis=0)
+            max_displacement_index = np.argmax(drift_ptps)
+            max_displacement = np.round(drift_ptps[max_displacement_index], 2)
+            depth_at_max_displacement = int(spatial_bins[max_displacement_index])
 
-        max_cumulative_drift_index = np.argmax(cumulative_drifts)
-        max_cumulative_drift = np.round(cumulative_drifts[max_cumulative_drift_index], 2)
-        depth_at_max_cumulative_drift = int(spatial_bins[max_cumulative_drift_index])
+            max_cumulative_drift_index = np.argmax(cumulative_drifts)
+            max_cumulative_drift = np.round(cumulative_drifts[max_cumulative_drift_index], 2)
+            depth_at_max_cumulative_drift = int(spatial_bins[max_cumulative_drift_index])
 
-        ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="red", alpha=0.5)
+            ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="red", alpha=0.5)
 
-    ax_drift.set_title(
-        f"Max displacement: {max_displacement} $\mu m$ (depth: {depth_at_max_displacement} ) $\\mu m$\n"
-        f"Max cumulative drift: {max_cumulative_drift} $\mu m$ (depth: {depth_at_max_cumulative_drift} ) $\\mu m$\n"
-    )
+    if motion is not None:
+        ax_drift.set_title(
+            f"Max displacement: {max_displacement} $\mu m$ (depth: {depth_at_max_displacement} ) $\\mu m$\n"
+            f"Max cumulative drift: {max_cumulative_drift} $\mu m$ (depth: {depth_at_max_cumulative_drift} ) $\\mu m$\n"
+        )
 
     drift_map_path = recording_fig_folder / "drift_map.png"
     fig_drift.savefig(drift_map_path, dpi=300)
