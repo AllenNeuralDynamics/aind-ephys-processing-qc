@@ -725,8 +725,12 @@ def generate_event_qc(
 
     logging.info("Generating SATURATION metric")
 
-    part_number = recording.get_annotation("probes_info")[0].get("part_number")
-    saturation_threshold_uv = saturation_thresholds_uv.get(part_number)
+    probes_info = recording.get_annotation("probes_info")
+    if probes_info is None:
+        saturation_threshold_uv = None
+    else:
+        part_number = recording.get_annotation("probes_info")[0].get("part_number")
+        saturation_threshold_uv = saturation_thresholds_uv.get(part_number)
 
     metrics = {}
     if saturation_threshold_uv is None:
