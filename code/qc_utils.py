@@ -19,6 +19,7 @@ from aind_data_schema.core.processing import Processing
 from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status
 from aind_qcportal_schema.metric_value import CurationMetric
 
+ISI_VISUAL_AREAS = ["VISp", "VISa", "VISal", "VISam", "VISl", "VISli", "VISpl", "VISpm", "VISpor", "VISrl", "VIS"]
 
 def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
     figsize = (subplot_figsize[0] * ncols, subplot_figsize[1] * nrows)
@@ -73,6 +74,21 @@ def load_processing_metadata(processing_json):
     return Processing(**processing_dict)
 
 
+def _get_surface_channel(recording: si.BaseRecording, channel_labels: np.ndarray) -> int | None:
+    y_locs = recording.get_channel_locations()[:, 1]
+    surface_channel_y_position = None
+    if channel_labels is not None:
+        channel_ids_out = recording.channel_ids[channel_labels == 'out']
+
+        if len(channel_ids_out) == 0:
+           logging.info(f"No out channels detected")
+        else:
+            surface_channel_id = channel_ids_out[0]
+            surface_channel_index = recording.channel_ids.tolist().index(surface_channel_id)
+            surface_channel_y_position = y_locs[surface_channel_index]
+    
+    return surface_channel_y_position
+
 def plot_raw_data(
     recording: si.BaseRecording,
     recording_lfp: si.BaseRecording | None = None,
@@ -80,6 +96,7 @@ def plot_raw_data(
     duration_s: float = 0.1,
     freq_ap: float = 300,
     freq_lfp: float = 500,
+    channel_labels: np.ndarray | None = None
 ):
     """
     Plot snippets of raw data as an image
@@ -98,6 +115,8 @@ def plot_raw_data(
         The highpass cutoff frequency for the ap band
     freq_lfp : float, default: 500
         The lowpass cutoff frequency in case recording_lfp is None
+    channel_labels: np.ndarray | None
+        The channel labels from preprocessing. Out, dead, noise
 
     Returns
     -------
@@ -110,6 +129,9 @@ def plot_raw_data(
     recording_hp = spre.highpass_filter(recording, freq_min=freq_ap)
     if recording_lfp is None:
         recording_lfp = spre.bandpass_filter(recording, freq_min=0.1, freq_max=freq_lfp)
+    
+    surface_channel_y_position = _get_surface_channel(recording, channel_labels)
+
     for segment_index in range(num_segments):
         # evenly distribute t_starts across segments
         times = recording.get_times(segment_index=segment_index)
@@ -135,6 +157,10 @@ def plot_raw_data(
                 ax=ax_lfp,
                 clim=(-300, 300),
             )
+            if surface_channel_y_position is not None:
+                ax_ap.axhline(y=surface_channel_y_position, c='g')
+                ax_lfp.axhline(y=surface_channel_y_position, c='g')
+
             if np.mod(num_snippets_per_segment, 2) == 1:
                 if snippet_index == num_snippets_per_segment // 2:
                     ax_ap.set_title(f"seg{segment_index} @ {t_start}s\nAP")
@@ -168,6 +194,7 @@ def plot_psd(
     freq_lf_viz: float = 100.0,
     freq_hf_filt: float = 3000.0,
     freq_hf_viz: float = 5000.0,
+    channel_labels: np.ndarray | None = None
 ):
     """
     Plot spectra for wide/band, low frequency, and high frequency.
@@ -180,6 +207,8 @@ def plot_psd(
         Number of snippets to plot for each segment.
     duration_s : float, default: 1
         The duration of each snippet.
+    channel_labels: np.ndarray | None
+        The channel labels from preprocessing. Out, dead, noise
 
     Returns
     -------
@@ -204,6 +233,8 @@ def plot_psd(
     else:
         recording_lfp = spre.bandpass_filter(recording_lfp, freq_min=0.1, freq_max=freq_lf_filt)
     depths = recording.get_channel_locations()[:, 1]
+
+    surface_channel_y_position = _get_surface_channel(recording, channel_labels)
 
     for segment_index in range(num_segments):
         # evenly distribute t_starts across segments
@@ -298,6 +329,11 @@ def plot_psd(
             ax_psd_hf.set_yscale("log")
             ax_psd_lf.set_yscale("log")
 
+            if surface_channel_y_position is not None:
+                ax_psd_channels.axhline(y=surface_channel_y_position, c='g')
+                ax_psd_hf_channels.axhline(y=surface_channel_y_position, c='g')
+                ax_psd_lf_channels.axhline(y=surface_channel_y_position, c='g')
+
     fig_psd.subplots_adjust(wspace=0.3, hspace=0.3, top=0.8)
     fig_psd_hf.subplots_adjust(wspace=0.3, hspace=0.3, top=0.8)
     fig_psd_lf.subplots_adjust(wspace=0.3, hspace=0.3, top=0.8)
@@ -308,10 +344,12 @@ def plot_psd(
     return fig_psd, fig_psd_hf, fig_psd_lf
 
 
-def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None):
+def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None, channel_labels: np.ndarray | None = None):
     """ """
     num_segments = recording.get_num_segments()
     fig_rms, ax_rms = plt.subplots(figsize=(5, 8))
+
+    surface_channel_y_position = _get_surface_channel(recording, channel_labels)
 
     if recording_lfp is None:
         # this means the recording is wide-band, so we apply an additional hp filter
@@ -333,6 +371,9 @@ def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None
         rms_pre = np.sqrt(np.sum(data_pre**2, axis=0) / data_pre.shape[0])
         ax_rms.plot(rms_pre, depths_pre, color="r", label="preprocessed")
         ax_rms.legend()
+
+    if surface_channel_y_position is not None:
+        ax_rms.axhline(y=surface_channel_y_position, c='g')
 
     ax_rms.set_xlabel("RMS ($\mu V$)")
     ax_rms.set_ylabel("Depth ($\mu m$)")
@@ -386,8 +427,24 @@ def generate_raw_qc(
     status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
     status_pass = QCStatus(evaluator="", status=Status.PASS, timestamp=now)
 
+    channel_labels = None
+    if processing is not None:
+        try:
+            data_processes = processing.processing_pipeline.data_processes
+            for data_process in data_processes:
+                params = data_process.parameters.model_dump()
+                outputs = data_process.outputs.model_dump()
+                if (
+                    data_process.name == "Ephys preprocessing"
+                    and params.get("recording_name") is not None
+                    and params.get("recording_name") == recording_name
+                ):
+                    channel_labels = np.array(outputs.get("channel_labels"))
+        except:
+            logging.info(f"Failed to load bad channel labels for {recording_name}")
+
     logging.info("Generating RAW DATA metrics")
-    fig_raw = plot_raw_data(recording, recording_lfp)
+    fig_raw = plot_raw_data(recording, recording_lfp, channel_labels=channel_labels)
     raw_traces_path = recording_fig_folder / "traces_raw.png"
     fig_raw.savefig(raw_traces_path, dpi=300)
     if relative_to is not None:
@@ -419,7 +476,7 @@ def generate_raw_qc(
     metrics["Raw Data"] = [raw_data_metric]
 
     logging.info("Generating PSD metrics")
-    fig_psd_wide, fig_psd_hf, fig_psd_lf = plot_psd(recording, recording_lfp=recording_lfp)
+    fig_psd_wide, fig_psd_hf, fig_psd_lf = plot_psd(recording, recording_lfp=recording_lfp, channel_labels=channel_labels)
     psd_wide_path = recording_fig_folder / "psd_wide.png"
     psd_hf_path = recording_fig_folder / "psd_hf.png"
     psd_lf_path = recording_fig_folder / "psd_lf.png"
@@ -472,46 +529,31 @@ def generate_raw_qc(
     metrics["PSD"] = [psd_wide_metric, psd_hf_metric, psd_lf_metric]
 
     logging.info("Generating NOISE metrics")
-    fig_rms, ax_rms = plot_rms_by_depth(recording, recording_preprocessed)
+    fig_rms, ax_rms = plot_rms_by_depth(recording, recording_preprocessed, channel_labels=channel_labels)
     # Bad channel detection out of brain, noisy, silent
-    if processing is not None:
-        try:
-            data_processes = processing.processing_pipeline.data_processes
-            for data_process in data_processes:
-                params = data_process.parameters.model_dump()
-                outputs = data_process.outputs.model_dump()
-                if (
-                    data_process.name == "Ephys preprocessing"
-                    and params.get("recording_name") is not None
-                    and params.get("recording_name") == recording_name
-                ):
-                    channel_labels = np.array(outputs.get("channel_labels"))
-                    if channel_labels is not None:
-                        metric_values = {
-                            "good": int(np.sum(channel_labels == "good")),
-                            "noise": int(np.sum(channel_labels == "noise")),
-                            "dead": int(np.sum(channel_labels == "dead")),
-                            "out": int(np.sum(channel_labels == "out")),
-                        }
-                        metric_values_str = None
-                        for metric_name, metric_value in metric_values.items():
-                            if metric_values_str is None:
-                                metric_values_str = f"{metric_name}: {metric_value}"
-                            else:
-                                metric_values_str += f"\n{metric_name}: {metric_value}"
-                        props = dict(boxstyle="round", facecolor="wheat", alpha=0.5)
-                        ax_rms.text(
-                            0.2,
-                            0.9,
-                            metric_values_str,
-                            transform=fig_rms.transFigure,
-                            fontsize=14,
-                            verticalalignment="top",
-                            bbox=props,
-                        )
-
-        except:
-            logging.info(f"Failed to load bad channel labels for {recording_name}")
+    if channel_labels is not None:
+        metric_values = {
+            "good": int(np.sum(channel_labels == "good")),
+            "noise": int(np.sum(channel_labels == "noise")),
+            "dead": int(np.sum(channel_labels == "dead")),
+            "out": int(np.sum(channel_labels == "out")),
+        }
+        metric_values_str = None
+        for metric_name, metric_value in metric_values.items():
+            if metric_values_str is None:
+                metric_values_str = f"{metric_name}: {metric_value}"
+            else:
+                metric_values_str += f"\n{metric_name}: {metric_value}"
+        props = dict(boxstyle="round", facecolor="wheat", alpha=0.5)
+        ax_rms.text(
+            0.2,
+            0.9,
+            metric_values_str,
+            transform=fig_rms.transFigure,
+            fontsize=14,
+            verticalalignment="top",
+            bbox=props,
+        )
 
     rms_path = recording_fig_folder / "rms.png"
     fig_rms.savefig(rms_path, dpi=300)
@@ -557,6 +599,8 @@ def generate_drift_qc(
         The path of the recording's motion folder.
     output_qc_path : Path
         The output path for the quality control.
+    processing : Processing | None, default: None
+        The processing metadata object.
 
     Returns
     -------
@@ -628,10 +672,11 @@ def generate_drift_qc(
         depth_at_max_cumulative_drift = int(spatial_bins[max_cumulative_drift_index])
 
         ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="red", alpha=0.5)
-        ax_drift.set_title(
-            f"Max displacement: {max_displacement} $\mu m$ (depth: {depth_at_max_displacement} ) $\\mu m$\n"
-            f"Max cumulative drift: {max_cumulative_drift} $\mu m$ (depth: {depth_at_max_cumulative_drift} ) $\\mu m$\n"
-        )
+
+    ax_drift.set_title(
+        f"Max displacement: {max_displacement} $\mu m$ (depth: {depth_at_max_displacement} ) $\\mu m$\n"
+        f"Max cumulative drift: {max_cumulative_drift} $\mu m$ (depth: {depth_at_max_cumulative_drift} ) $\\mu m$\n"
+    )
 
     drift_map_path = recording_fig_folder / "drift_map.png"
     fig_drift.savefig(drift_map_path, dpi=300)
@@ -1002,8 +1047,9 @@ def generate_units_qc(
     number_of_good_units = int(np.sum(default_qc == True))
 
     quality_metrics = sorting_analyzer.get_extension("quality_metrics").get_data()
+    template_metrics = sorting_analyzer.get_extension("template_metrics").get_data()
 
-    fig_yield, axs_yield = plt.subplots(2, 3, figsize=(15, 10))
+    fig_yield, axs_yield = plt.subplots(3, 3, figsize=(15, 10))
 
     # protect against all NaNs
     bins = np.linspace(0, 2, 20)
@@ -1026,6 +1072,24 @@ def generate_units_qc(
     ax_presence_ratio.set_title(f"Presence Ratio")
     ax_presence_ratio.spines[["top", "right"]].set_visible(False)
 
+    ax_drift = axs_yield[1, 0]
+    if not np.isnan(quality_metrics['drift_ptp']).all():
+        ax_drift.hist(quality_metrics['drift_ptp'], bins=20, density=True)
+    ax_drift.set_title(f"Drift Peak to Peak")
+    ax_drift.spines[["top", "right"]].set_visible(False)
+
+    ax_snr = axs_yield[1, 1]
+    if not np.isnan(quality_metrics['snr']).all():
+        ax_snr.hist(quality_metrics['snr'], bins=20, density=True)
+    ax_snr.set_title(f"SNR")
+    ax_snr.spines[["top", "right"]].set_visible(False)
+
+    ax_halfwidth = axs_yield[1, 2]
+    if not np.isnan(template_metrics['half_width']).all():
+        ax_halfwidth.hist(template_metrics['half_width'], bins=20, density=True)
+    ax_halfwidth.set_title(f"Half Width")
+    ax_halfwidth.spines[["top", "right"]].set_visible(False)
+
     channel_indices = np.array(
         list(si.get_template_extremum_channel(sorting_analyzer, mode="peak_to_peak", outputs="index").values())
     )
@@ -1036,7 +1100,7 @@ def generate_units_qc(
     mean_amplitude_by_depth = df_amplitudes_depths.groupby("channel_depth").mean()
 
     colors = {"sua": "green", "mua": "orange", "noise": "red"}
-    ax_amplitudes = axs_yield[1, 0]
+    ax_amplitudes = axs_yield[2, 0]
     if decoder_label is not None:
         for label in np.unique(decoder_label):
             mask = decoder_label == label
@@ -1055,7 +1119,7 @@ def generate_units_qc(
     ax_amplitudes.legend()
     ax_amplitudes.spines[["top", "right"]].set_visible(False)
 
-    ax_fr = axs_yield[1, 1]
+    ax_fr = axs_yield[2, 1]
     firing_rate = np.array(quality_metrics["firing_rate"].tolist())
     firing_rate[firing_rate > max_firing_rate_for_visualization] = max_firing_rate_for_visualization
     df_firing_rate_depths = pd.DataFrame({"firing_rate": firing_rate, "channel_depth": channel_depths})
@@ -1079,7 +1143,7 @@ def generate_units_qc(
     ax_fr.legend()
     ax_fr.spines[["top", "right"]].set_visible(False)
 
-    ax_text = axs_yield[1, 2]
+    ax_text = axs_yield[2, 2]
     ax_text.axis("off")
 
     metric_values = {
@@ -1144,6 +1208,21 @@ def generate_units_qc(
             status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)]
         )
         metrics["Sorting Curation"] = [sorting_curation_metric]
+    
+    logging.info("Generating ISI VISUAL AREA LABEL metric")
+    value_with_options = {
+        "value": "",
+        "options": ISI_VISUAL_AREAS,
+        "status": ["Pass" for area in ISI_VISUAL_AREAS],
+        "type": "dropdown",
+    }
+    isi_visual_area_metric = QCMetric(
+        name=f"Manual annotation of ISI Visual Area Label - {recording_name}",
+        description=f"Manual annotation of visual area label based on ISI imaging for {recording_name}",
+        value=value_with_options,
+        status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)]
+    )
+    metrics["ISI Visual Area Label"] = [isi_visual_area_metric]
 
     logging.info("Generating FIRING RATE metric")
     num_segments = sorting_analyzer.get_num_segments()
