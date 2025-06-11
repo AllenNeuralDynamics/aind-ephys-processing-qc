@@ -72,11 +72,11 @@ if __name__ == "__main__":
 
     logging.info("\nEPHYS QC")
 
-    # Use CO_CPUS env variable if available
-    N_JOBS_CO = os.getenv("CO_CPUS")
-    N_JOBS = int(N_JOBS_CO) if N_JOBS_CO is not None else -1
-
-    si.set_global_job_kwargs(n_jobs=N_JOBS, chunk_duration="1s")
+    # Use CO_CPUS/SLURM_JOB_CPUS_PER_NODE env variable if available
+    N_JOBS_EXT = os.getenv("CO_CPUS") or os.getenv("SLURM_JOB_CPUS_PER_NODE")
+    N_JOBS = int(N_JOBS_EXT) if N_JOBS_EXT is not None else -1
+    job_kwargs = dict(n_jobs=N_JOBS, progress_bar=False)
+    si.set_global_job_kwargs(**job_kwargs)
 
     ecephys_sorted_folders = [
         p
