@@ -1,5 +1,5 @@
 metadata_version: 1
-name: Quality Control Ecephys
+name: Quality Control Ecephys (dev)
 description: Capsule to compute ephys QC.
 tags:
 - ecephys
