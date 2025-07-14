@@ -46,27 +46,30 @@ if __name__ == "__main__":
     ]
 
     # capsule mode
-    assert len(ecephys_folders) == 1, "Attach one raw asset at a time"
-    ecephys_folder = ecephys_folders[0]
-    if HAVE_AIND_LOG_UTILS:
-        # look for subject.json and data_description.json files
-        subject_json = ecephys_folder / "subject.json"
-        subject_id = "undefined"
-        if subject_json.is_file():
-            subject_data = json.load(open(subject_json, "r"))
-            subject_id = subject_data["subject_id"]
+    ecephys_folder = None
+    if len(ecephys_folders) == 1:
+        ecephys_folder = ecephys_folders[0]
+        if HAVE_AIND_LOG_UTILS:
+            # look for subject.json and data_description.json files
+            subject_json = ecephys_folder / "subject.json"
+            subject_id = "undefined"
+            if subject_json.is_file():
+                subject_data = json.load(open(subject_json, "r"))
+                subject_id = subject_data["subject_id"]
 
-        data_description_json = ecephys_folder / "data_description.json"
-        session_name = "undefined"
-        if data_description_json.is_file():
-            data_description = json.load(open(data_description_json, "r"))
-            session_name = data_description["name"]
+            data_description_json = ecephys_folder / "data_description.json"
+            session_name = "undefined"
+            if data_description_json.is_file():
+                data_description = json.load(open(data_description_json, "r"))
+                session_name = data_description["name"]
 
-        log.setup_logging(
-            "Quality Control Ecephys",
-            subject_id=subject_id,
-            asset_name=session_name,
-        )
+            log.setup_logging(
+                "Quality Control Ecephys",
+                subject_id=subject_id,
+                asset_name=session_name,
+            )
+        else:
+            logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
     else:
         logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
 
@@ -173,27 +176,29 @@ if __name__ == "__main__":
             with open(visualization_json_file) as f:
                 visualization_output = json.load(f)
 
-    harp_folder = [p for p in (ecephys_folder / "behavior").glob("**/raw.harp")]
     event_dict = None
-    if len(harp_folder) == 1:
-        harp_folder = harp_folder[0]
-        logging.info("Harp folder found")
-        event_json_files = [p for p in harp_folder.parent.iterdir() if p.suffix == ".json"]
-        event_json_file = None
-        if len(event_json_files) == 1:
-            event_json_file = event_json_files[0]
-        elif len(event_json_files) > 1:
-            logging.info(f"Found {len(event_json_files)} JSON files in behavior folder. Determining behavior file by name")
-            # the JSON file should start with {subject_id}_{date}
-            if session_name != "undefined":
-                subject_date_str = "_".join(session_name.split("_")[1:-1])
-                for json_file in event_json_files:
-                    if json_file.name.startswith(subject_date_str):
-                        event_json_file = json_file
-                        break
-        if event_json_file is not None:
-            with open(event_json_file) as f:
-                event_dict = json.load(f)
+
+    if ecephys_folder is not None:
+        harp_folder = [p for p in (ecephys_folder / "behavior").glob("**/raw.harp")]
+        if len(harp_folder) == 1:
+            harp_folder = harp_folder[0]
+            logging.info("Harp folder found")
+            event_json_files = [p for p in harp_folder.parent.iterdir() if p.suffix == ".json"]
+            event_json_file = None
+            if len(event_json_files) == 1:
+                event_json_file = event_json_files[0]
+            elif len(event_json_files) > 1:
+                logging.info(f"Found {len(event_json_files)} JSON files in behavior folder. Determining behavior file by name")
+                # the JSON file should start with {subject_id}_{date}
+                if session_name != "undefined":
+                    subject_date_str = "_".join(session_name.split("_")[1:-1])
+                    for json_file in event_json_files:
+                        if json_file.name.startswith(subject_date_str):
+                            event_json_file = json_file
+                            break
+            if event_json_file is not None:
+                with open(event_json_file) as f:
+                    event_dict = json.load(f)
 
     if event_dict is None:
         logging.info("Events from HARP not found. Trigger event metrics will not be generated.")
