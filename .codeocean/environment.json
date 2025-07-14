@@ -36,6 +36,9 @@
 					"version": "0.4.0"
 				},
 				{
+					"name": "s3fs"
+				},
+				{
 					"name": "spikeinterface[full,widgets]",
 					"version": "0.102.3"
 				},
