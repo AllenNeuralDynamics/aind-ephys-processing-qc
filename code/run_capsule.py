@@ -14,7 +14,7 @@ import spikeinterface as si
 
 # AIND
 from aind_data_schema_models.modalities import Modality
-from aind_data_schema.core.quality_control import QualityControl, QCEvaluation, Stage
+from aind_data_schema.core.quality_control import QualityControl, Stage
 
 try:
     from aind_log_utils import log
@@ -169,7 +169,10 @@ if __name__ == "__main__":
     if ecephys_sorted_folder is not None:
         processing_json_file = ecephys_sorted_folder / "processing.json"
         if processing_json_file.is_file():
-            processing = load_processing_metadata(processing_json_file)
+            try:
+                processing = load_processing_metadata(processing_json_file)
+            except:
+                logging.info(f"Failed ot load processing.json")
 
         visualization_json_file = ecephys_sorted_folder / "visualization_output.json"
         if visualization_json_file.is_file():
@@ -204,10 +207,10 @@ if __name__ == "__main__":
         logging.info("Events from HARP not found. Trigger event metrics will not be generated.")
 
     # look for JSON files or loop through preprocessed
+    all_metrics = []
+    all_metric_names = []
+    recording_names = [jd["recording_name"] for jd in job_dicts]
     for job_dict in job_dicts:
-        all_metrics_raw = {}
-        all_metrics_processed = {}
-
         recording_name = job_dict["recording_name"]
         recording = si.load(job_dict["recording_dict"], base_folder=data_folder)
         skip_times = job_dict.get("skip_times", False)
@@ -246,7 +249,7 @@ if __name__ == "__main__":
 
         quality_control_fig_folder = results_folder / f"quality_control_{recording_name}"
         
-        metrics_raw = generate_raw_qc(
+        metrics_raw, raw_names = generate_raw_qc(
             recording,
             recording_name,
             quality_control_fig_folder,
@@ -256,8 +259,10 @@ if __name__ == "__main__":
             processing=processing,
             visualization_output=visualization_output,
         )
+        all_metrics.extend(metrics_raw)
+        all_metric_names.extend(raw_names)
         
-        metrics_event = generate_event_qc(
+        metrics_event, event_names = generate_event_qc(
             recording,
             recording_name,
             quality_control_fig_folder,
@@ -265,64 +270,40 @@ if __name__ == "__main__":
             event_dict=event_dict,
             event_keys=["licktime", "optogeneticstime"],
         )
-        metrics_raw.update(metrics_event)
+        all_metrics.extend(metrics_event)
+        all_metric_names.extend(event_names)
         
         if ecephys_sorted_folder is not None:
             motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
 
-            metrics_drift = generate_drift_qc(
+            metrics_drift, drift_names = generate_drift_qc(
                 recording, recording_name, motion_path, quality_control_fig_folder, relative_to=results_folder
             )
-            metrics_raw.update(metrics_drift)
-
-        for evaluation_name, metric_list in metrics_raw.items():
-            if evaluation_name in all_metrics_raw:
-                all_metrics_raw[evaluation_name].extend(metric_list)
-            else:
-                all_metrics_raw[evaluation_name] = metric_list
+            all_metrics.extend(metrics_drift)
+            all_metric_names.extend(drift_names)
         
         if ecephys_sorted_folder is not None:
-            metrics_processed = generate_units_qc(
+            metrics_units, units_names = generate_units_qc(
                 sorting_analyzer,
                 recording_name,
                 quality_control_fig_folder,
                 relative_to=results_folder,
                 visualization_output=visualization_output,
+                raw_recording=recording
             )
+            all_metrics.extend(metrics_units)
+            all_metric_names.extend(units_names)
 
-            for evaluation_name, metric_list in metrics_processed.items():
-                if evaluation_name in all_metrics_processed:
-                    all_metrics_processed[evaluation_name].extend(metric_list)
-                else:
-                    all_metrics_processed[evaluation_name] = metric_list
+        # make metric names unique
+        all_metric_names = list(set(all_metric_names))
 
-        # generate evaluations
-        evaluations = []
-        for evaluation_name, metrics in all_metrics_raw.items():
-            evaluation = QCEvaluation(
-                modality=Modality.ECEPHYS,
-                stage=Stage.RAW,
-                name=evaluation_name,
-                description=evaluation_name,
-                metrics=metrics,
-            )
-            evaluations.append(evaluation)
-
-        for evaluation_name, metrics in all_metrics_processed.items():
-            evaluation = QCEvaluation(
-                modality=Modality.ECEPHYS,
-                stage=Stage.PROCESSING,
-                name=evaluation_name,
-                description=evaluation_name,
-                metrics=metrics,
-            )
-            evaluations.append(evaluation)
-
-        # make quality control
-        quality_control = QualityControl(evaluations=evaluations)
-
-        with (results_folder / f"quality_control_{recording_name}.json").open("w") as f:
-            f.write(quality_control.model_dump_json(indent=3))
+        # make quality control with metric types as groups
+        # probe/streams are added at aggregation
+        quality_control = QualityControl(
+            metrics=all_metrics,
+            default_grouping=all_metric_names,
+        )
+        quality_control.write_standard_file(output_directory=results_folder, suffix=f"_{recording_name}.json")
 
     t_qc_end_all = time.perf_counter()
     elapsed_time_qc_all = np.round(t_qc_end_all - t_qc_start_all, 2)
