@@ -4,6 +4,7 @@ from pathlib import Path
 import logging
 import json
 from datetime import datetime
+from urllib.parse import quote
 
 import numpy as np
 import pandas as pd
@@ -15,9 +16,10 @@ import spikeinterface as si
 import spikeinterface.preprocessing as spre
 import spikeinterface.widgets as sw
 
+from aind_data_schema_models.modalities import Modality
+
 from aind_data_schema.core.processing import Processing
-from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status
-from aind_qcportal_schema.metric_value import CurationMetric
+from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status, Stage, CurationMetric
 
 ISI_VISUAL_AREAS = ["VISp", "VISa", "VISal", "VISam", "VISl", "VISli", "VISpl", "VISpm", "VISpor", "VISrl", "VIS"]
 
@@ -34,6 +36,9 @@ def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
 
 
 def load_preprocessed_recording(preprocessed_json_file, session_name, ecephys_folder, data_folder):
+    """
+    Loads preprocessed recording from preprocessed JSON file.
+    """
     recording_preprocessed = None
     if preprocessed_json_file.is_file():
         try:
@@ -59,6 +64,9 @@ def load_preprocessed_recording(preprocessed_json_file, session_name, ecephys_fo
 
 
 def load_processing_metadata(processing_json):
+    """
+    Loads processing metadata.
+    """
     with open(processing_json) as f:
         processing_dict = json.load(f)
     processing_dict.pop("schema_version")
@@ -72,6 +80,28 @@ def load_processing_metadata(processing_json):
             new_data_processes.append(dp)
     processing_dict["processing_pipeline"]["data_processes"] = new_data_processes
     return Processing(**processing_dict)
+
+
+def get_recording_relative_path(recording):
+    """
+    Returns path of recording file relative to session folder.
+
+    If more than one file path is found, it returns None.
+    """
+    from spikeinterface.core.core_tools import _get_paths_list
+
+    relative_path = None
+    possible_substrings = ["ecephys/", "ecephys_compressed/", "ecephys_session/"]
+    file_paths = _get_paths_list(recording.to_dict(recursive=True))
+
+    if len(file_paths) == 1:
+        file_path = str(file_paths[0])
+        for possible_substring in possible_substrings:
+            substring_index = str(file_path).find(possible_substring)
+            if substring_index > 0:
+                relative_path = file_path[substring_index:]
+                break
+    return relative_path
 
 
 def _get_surface_channel(recording: si.BaseRecording, channel_labels: np.ndarray) -> int | None:
@@ -417,10 +447,13 @@ def generate_raw_qc(
 
     Returns
     -------
-    dict[str : list[QCMetric]]:
+    metrics : list[QCMetric]:
         The quality control metrics.
+    metric_names : list[str]
+        List of metric names added
     """
-    metrics = {}
+    metrics = []
+    metric_names = []
     recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
     now = datetime.now()
@@ -467,13 +500,17 @@ def generate_raw_qc(
         timeseries_str = "No visualization output found in results."
 
     raw_data_metric = QCMetric(
-        name=f"Raw data {recording_name} ",
+        name=f"Raw data {recording_name}",
+        modality=Modality.ECEPHYS,
+        stage=Stage.RAW,
         description=f"Evaluation of {recording_name} raw data. {timeseries_str}",
         value=raw_data_value_with_flags,
         reference=str(raw_traces_path),
         status_history=[status_pending],
+        tags=[recording_name, "Raw Data"]
     )
-    metrics["Raw Data"] = [raw_data_metric]
+    metrics.append(raw_data_metric)
+    metric_names.append("Raw Data")
 
     logging.info("Generating PSD metrics")
     fig_psd_wide, fig_psd_hf, fig_psd_lf = plot_psd(recording, recording_lfp=recording_lfp, channel_labels=channel_labels)
@@ -491,12 +528,17 @@ def generate_raw_qc(
         psd_lf_path = psd_lf_path.relative_to(relative_to)
 
     psd_wide_metric = QCMetric(
-        name=f"PSD (Wide Band) {recording_name} ",
+        name=f"PSD (Wide Band) {recording_name}",
+        modality=Modality.ECEPHYS,
+        stage=Stage.RAW,
         description=f"Evaluation of {recording_name} wide-band power spectrum density",
         reference=str(psd_wide_path),
         value=None,
         status_history=[status_pass],
+        tags=[recording_name, "PSD (Wide Band)"]
     )
+    metrics.append(psd_wide_metric)
+    metric_names.append("PSD (Wide Band)")
 
     hf_value_with_flags = {
         "value": "",
@@ -506,12 +548,18 @@ def generate_raw_qc(
     }
 
     psd_hf_metric = QCMetric(
-        name=f"PSD (High Frequency) {recording_name} ",
+        name=f"PSD (High Frequency) {recording_name}",
+        modality=Modality.ECEPHYS,
+        stage=Stage.RAW,
         description=f"Evaluation of {recording_name} high-frequency power spectrum density",
         reference=str(psd_hf_path),
         value=hf_value_with_flags,
         status_history=[status_pending],
+        tags=[recording_name, "PSD (High Frequency)"]
     )
+    metrics.append(psd_hf_metric)
+    metric_names.append("PSD (High Frequency)")
+
     lf_value_with_flags = {
         "value": "",
         "options": ["No contamination", "Line (60 Hz) contamination"],
@@ -521,12 +569,17 @@ def generate_raw_qc(
 
     psd_lf_metric = QCMetric(
         name=f"PSD (Low Frequency) {recording_name}",
+        modality=Modality.ECEPHYS,
+        stage=Stage.RAW,
         description=f"Evaluation of {recording_name} low-frequency power spectrum density",
         reference=str(psd_lf_path),
         value=lf_value_with_flags,
         status_history=[status_pending],
+        tags=[recording_name, "PSD (Low Frequency)"]
     )
-    metrics["PSD"] = [psd_wide_metric, psd_hf_metric, psd_lf_metric]
+    metrics.append(psd_lf_metric)
+    metric_names.append("PSD (Low Frequency)")
+    
 
     logging.info("Generating NOISE metrics")
     fig_rms, ax_rms = plot_rms_by_depth(recording, recording_preprocessed, channel_labels=channel_labels)
@@ -569,14 +622,18 @@ def generate_raw_qc(
     }
     rms_metric = QCMetric(
         name=f"RMS {recording_name}",
+        modality=Modality.ECEPHYS,
+        stage=Stage.RAW,
         description=f"Evaluation of {recording_name} RMS",
         reference=str(rms_path),
         value=value_with_options,
         status_history=[status_pass],
+        tags=[recording_name, "RMS"]
     )
-    metrics["Noise"] = [rms_metric]
+    metrics.append(rms_metric)
+    metric_names.append("RMS")
 
-    return metrics
+    return metrics, metric_names
 
 
 def generate_drift_qc(
@@ -604,8 +661,10 @@ def generate_drift_qc(
 
     Returns
     -------
-    QCMetric:
-        The quality control metric for drift.
+    metrics : list[QCMetric]:
+        The quality control metrics.
+    metric_names : list[str]
+        List of metric names added
     """
 
     logging.info("Generating DRIFT metric")
@@ -694,14 +753,18 @@ def generate_drift_qc(
     }
     drift_metric = QCMetric(
         name=f"Probe Drift - {recording_name}",
+        modality=Modality.ECEPHYS,
+        stage=Stage.RAW,
         description=f"Evaluation of {recording_name} probe drift",
         reference=str(drift_map_path),
         value=value_with_options,
         status_history=[QCStatus(evaluator="", status=Status.PENDING, timestamp=datetime.now())],
+        tags=[recording_name, "Probe Drift"]
+        
     )
-    drift_metrics = {"Drift": [drift_metric]}
+    drift_metrics = [drift_metric]
 
-    return drift_metrics
+    return drift_metrics, ["Probe Drift"]
 
 
 def generate_event_qc(
@@ -718,6 +781,13 @@ def generate_event_qc(
     """
     Generate event metrics for a given recording.
     The event metrics include saturation and responses to certain events.
+
+    Returns
+    -------
+    metrics : list[QCMetric]:
+        The quality control metrics.
+    metric_names : list[str]
+        List of metric names added
     """
     recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
@@ -734,7 +804,8 @@ def generate_event_qc(
         part_number = recording.get_annotation("probes_info")[0].get("part_number")
         saturation_threshold_uv = saturation_thresholds_uv.get(part_number)
 
-    metrics = {}
+    metrics = []
+    metric_names = []
     if saturation_threshold_uv is None:
         logging.info(f"\tSaturation threshold for {recording_name}. Cannot generate saturation metrics.")
     else:
@@ -840,10 +911,13 @@ def generate_event_qc(
 
         saturation_samples_metric = QCMetric(
             name=f"Saturation events samples {recording_name}",
+            modality=Modality.ECEPHYS,
+            stage=Stage.RAW,
             description=f"Evaluation of {recording_name} saturation samples",
             reference=str(fig_sat_samples_path),
             value={"value": "Pass"},
             status_history=[status_pass],
+            tags=[recording_name, "Saturation samples"]
         )
 
         # saturation events timeline
@@ -887,13 +961,19 @@ def generate_event_qc(
 
         saturation_timeline_metric = QCMetric(
             name=f"Saturation events timeline {recording_name}",
+            modality=Modality.ECEPHYS,
+            stage=Stage.RAW,
             description=f"Evaluation of {recording_name} saturation timeline",
             reference=str(fig_sat_time_path),
             value=value_with_options,
             status_history=[saturation_status],
+            tags=[recording_name, "Saturation timeline"]
         )
 
-        metrics["Saturation"] = [saturation_timeline_metric, saturation_samples_metric]
+        metrics.append(saturation_timeline_metric)
+        metric_names.append("Saturation timeline")
+        metrics.append(saturation_samples_metric)
+        metric_names.append("Saturation samples")
 
     if event_dict is not None:
         logging.info("Generating TRIGGER EVENT metrics")
@@ -984,14 +1064,18 @@ def generate_event_qc(
 
         trigger_event_metric = QCMetric(
             name=f"Trigger events {recording_name}",
+            modality=Modality.ECEPHYS,
+            stage=Stage.RAW,
             description=f"Evaluation of {recording_name} trigger events",
             reference=str(fig_events_path),
             value=value_with_options,
             status_history=[events_status],
+            tags=[recording_name, "Trigger events"]
         )
-        metrics["Trigger Events"] = [trigger_event_metric]
+        metrics.append(trigger_event_metric)
+        metric_names.append("Trigger events")
 
-    return metrics
+    return metrics, metric_names
 
 
 def generate_units_qc(
@@ -1000,6 +1084,7 @@ def generate_units_qc(
     output_qc_path: Path,
     relative_to: Path | None = None,
     visualization_output: dict | None = None,
+    raw_recording: si.BaseRecording | None = None,
     max_amplitude_for_visualization: float = 5000,
     max_firing_rate_for_visualization: float = 50,
     bin_duration_hist_s: float = 1,
@@ -1019,6 +1104,8 @@ def generate_units_qc(
         The relative path to the output path.
     visualization_output : dict | None, default: None
         The visualization output dict.
+    raw_recording : BaseRecording
+        The raw recording (used to infer recording path)
     max_amplitude_for_visualization : float, default: 5000
         The maximum amplitude used for plotting.
     max_firing_rate_for_visualization : float, default: 50
@@ -1028,10 +1115,13 @@ def generate_units_qc(
 
     Returns
     -------
-    dict[str : list[QCMetric]]:
+    metrics : list[QCMetric]:
         The quality control metrics.
-    """
-    metrics = {}
+    metric_names : list[str]
+        List of metric names added
+    """    
+    metrics = []
+    metric_names = []
     recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
     now = datetime.now()
@@ -1195,26 +1285,41 @@ def generate_units_qc(
     }
     yield_metric = QCMetric(
         name=f"Unit Metrics Yield - {recording_name}",
+        modality=Modality.ECEPHYS,
+        stage=Stage.PROCESSING,
         description=f"Evaluation of {recording_name} unit metrics yield. {sorting_summary_str}",
         reference=str(unit_yield_path),
         value=value_with_options,
         status_history=[status_pending],
+        tags=[recording_name, "Unit Yield"]
     )
-    metrics["Unit Yield"] = [yield_metric]
+    metrics.append(yield_metric)
+    metric_names.append("Unit Yield")
 
     logging.info("Generating SORTING CURATION metric")
-    if sorting_summary_link is not None:
-        gh_uri_str = sorting_summary_link[sorting_summary_link.find("&s="):sorting_summary_link.find("}&")+1]
-        sorting_summary_link_no_gh = sorting_summary_link.replace(gh_uri_str, "")
-        sorting_curation_metric = QCMetric(
-            name=f"Sorting Curation - {recording_name}",
-            description=f"Sorting Curation for {recording_name}",
-            reference=sorting_summary_link_no_gh,
-            value=CurationMetric(),
-            status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)]
-        )
-        metrics["Sorting Curation"] = [sorting_curation_metric]
-    
+    curation_link = "https://ephys.allenneuraldynamics.org/ephys_gui_app?analyzer_path={derived_asset_location}/postprocessed/"
+    curation_link += f"{recording_name}.zarr&recording_path="
+    if raw_recording is not None:
+        curation_link += "{raw_asset_location}/"
+        # figure out whether ecephys_compressed or ecephys/ecephys_compressed #TODO
+        recording_relative_path = get_recording_relative_path(raw_recording)
+        curation_link += recording_relative_path
+
+    curation_link_url = quote(curation_link)
+
+    sorting_curation_metric = QCMetric(
+        name=f"Sorting Curation - {recording_name}",
+        modality=Modality.ECEPHYS,
+        stage=Stage.PROCESSING,
+        description=f"Sorting Curation for {recording_name}",
+        reference=curation_link_url,
+        value={},
+        status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
+        tags=[recording_name, "Sorting Curation"]
+    )
+    metrics.append(sorting_curation_metric)
+    metric_names.append("Sorting Curation")
+
     logging.info("Generating ISI VISUAL AREA LABEL metric")
     value_with_options = {
         "value": "",
@@ -1224,11 +1329,15 @@ def generate_units_qc(
     }
     isi_visual_area_metric = QCMetric(
         name=f"Manual annotation of ISI Visual Area Label - {recording_name}",
+        modality=Modality.ECEPHYS,
+        stage=Stage.PROCESSING,
         description=f"Manual annotation of visual area label based on ISI imaging for {recording_name}",
         value=value_with_options,
-        status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)]
+        status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
+        tags=[recording_name, "ISI Visual Area Label"]
     )
-    metrics["ISI Visual Area Label"] = [isi_visual_area_metric]
+    metrics.append(isi_visual_area_metric)
+    metric_names.append("ISI Visual Area Label")
 
     logging.info("Generating FIRING RATE metric")
     num_segments = sorting_analyzer.get_num_segments()
@@ -1274,14 +1383,18 @@ def generate_units_qc(
     }
     firing_rate_metric = QCMetric(
         name=f"Firing rate - {recording_name}",
+        modality=Modality.ECEPHYS,
+        stage=Stage.PROCESSING,
         description=f"Evaluation of {recording_name} firing rate",
         reference=str(firing_rate_path),
         value=value_with_options,
         status_history=[status_pending],
+        tags=[recording_name, "Firing Rate"]
     )
-    metrics["Firing Rate"] = [firing_rate_metric]
+    metrics.append(firing_rate_metric)
+    metric_names.append("Firing Rate")
 
-    return metrics
+    return metrics, metric_names
 
 
 ### EVENTS UTILS
