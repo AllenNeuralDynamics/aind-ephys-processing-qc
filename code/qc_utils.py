@@ -918,7 +918,7 @@ def generate_event_qc(
             analyzer = si.create_sorting_analyzer(sorting_events, recording, sparse=False)
 
             extensions = {
-                "random_spikes": {"method": "all"},
+                "random_spikes": {"method": "uniform"},
                 "templates": {"ms_before": 10, "ms_after": 10},
             }
             analyzer.compute(extensions, **job_kwargs)
