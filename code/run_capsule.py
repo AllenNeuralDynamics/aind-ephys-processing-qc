@@ -38,6 +38,14 @@ results_folder = Path("../results")
 if __name__ == "__main__":
     t_qc_start_all = time.perf_counter()
 
+    # Get the total size of the shared memory filesystem
+    shm_stat = os.statvfs('/dev/shm')
+    total_shm = shm_stat.f_frsize * shm_stat.f_blocks  # Total size in bytes
+    free_shm = shm_stat.f_frsize * shm_stat.f_bfree    # Free size in bytes
+
+    print(f"Total /dev/shm size: {total_shm / 1024**3:.2f} GB")
+    print(f"Free /dev/shm size: {free_shm / 1024**3:.2f} GB")
+
     # pipeline mode VS capsule mode
     ecephys_folders = [
         p
