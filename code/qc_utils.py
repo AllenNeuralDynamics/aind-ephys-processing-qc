@@ -919,7 +919,7 @@ def generate_event_qc(
 
             extensions = {
                 "random_spikes": {"method": "uniform"},
-                "templates": {"ms_before": 10, "ms_after": 10},
+                "templates": {"ms_before": 5, "ms_after": 5},
             }
             analyzer.compute(extensions, **job_kwargs)
             template_ext = analyzer.get_extension("templates")
