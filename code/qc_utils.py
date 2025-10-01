@@ -142,6 +142,7 @@ def plot_raw_data(
             sw.plot_traces(
                 recording_hp,
                 time_range=[t_start, t_start + duration_s],
+                segment_index=segment_index,
                 mode="map",
                 return_scaled=True,
                 with_colorbar=True,
@@ -151,6 +152,7 @@ def plot_raw_data(
             sw.plot_traces(
                 recording_lfp,
                 time_range=[t_start, t_start + duration_s],
+                segment_index=segment_index,
                 mode="map",
                 return_scaled=True,
                 with_colorbar=True,
