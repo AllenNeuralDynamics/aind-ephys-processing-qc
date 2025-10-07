@@ -172,6 +172,7 @@ def plot_raw_data(
             sw.plot_traces(
                 recording_hp,
                 time_range=[t_start, t_start + duration_s],
+                segment_index=segment_index,
                 mode="map",
                 return_scaled=True,
                 with_colorbar=True,
@@ -181,6 +182,7 @@ def plot_raw_data(
             sw.plot_traces(
                 recording_lfp,
                 time_range=[t_start, t_start + duration_s],
+                segment_index=segment_index,
                 mode="map",
                 return_scaled=True,
                 with_colorbar=True,
@@ -998,7 +1000,8 @@ def generate_event_qc(
             analyzer = si.create_sorting_analyzer(sorting_events, recording, sparse=False)
 
             extensions = {
-                "random_spikes": {"method": "all"},
+                "random_spikes": {"method": "uniform"},
+                "waveforms": {"ms_before": 10, "ms_after": 10},
                 "templates": {"ms_before": 10, "ms_after": 10},
             }
             analyzer.compute(extensions, **job_kwargs)
