@@ -20,6 +20,7 @@ from aind_data_schema_models.modalities import Modality
 
 from aind_data_schema.core.processing import Processing
 from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status, Stage, CurationMetric
+from aind_qcportal_schema.metric_value import DropdownMetric
 
 ISI_VISUAL_AREAS = ["VISp", "VISa", "VISal", "VISam", "VISl", "VISli", "VISpl", "VISpm", "VISpor", "VISrl", "VIS"]
 
@@ -485,13 +486,13 @@ def generate_raw_qc(
     if relative_to is not None:
         raw_traces_path = raw_traces_path.relative_to(relative_to)
 
-    raw_data_value_with_flags = {
+    value_with_options = {
         "value": "",
         "options": ["Normal", "No spikes", "Noisy"],
         "status": ["Pass", "Fail", "Fail"],
         "type": "dropdown",
     }
-
+    value = DropdownMetric(**value_with_options)
     if visualization_output is not None:
         if recording_name in visualization_output:
             timeseries_link = visualization_output[recording_name].get("timeseries")
@@ -506,7 +507,7 @@ def generate_raw_qc(
         modality=Modality.ECEPHYS,
         stage=Stage.RAW,
         description=f"Evaluation of {recording_name} raw data. {timeseries_str}",
-        value=raw_data_value_with_flags,
+        value=value,
         reference=str(raw_traces_path),
         status_history=[status_pending],
         tags=[recording_name, "Raw Data"]
@@ -542,40 +543,40 @@ def generate_raw_qc(
     metrics.append(psd_wide_metric)
     metric_names.append("PSD (Wide Band)")
 
-    hf_value_with_flags = {
+    value_with_options = {
         "value": "",
         "options": ["No contamination", "High frequency contamination"],
         "status": ["Pass", "Fail"],
         "type": "dropdown",
     }
-
+    value = DropdownMetric(**value_with_options)
     psd_hf_metric = QCMetric(
         name=f"PSD (High Frequency) {recording_name}",
         modality=Modality.ECEPHYS,
         stage=Stage.RAW,
         description=f"Evaluation of {recording_name} high-frequency power spectrum density",
         reference=str(psd_hf_path),
-        value=hf_value_with_flags,
+        value=value,
         status_history=[status_pending],
         tags=[recording_name, "PSD (High Frequency)"]
     )
     metrics.append(psd_hf_metric)
     metric_names.append("PSD (High Frequency)")
 
-    lf_value_with_flags = {
+    value_with_options = {
         "value": "",
         "options": ["No contamination", "Line (60 Hz) contamination"],
         "status": ["Pass", "Fail"],
         "type": "dropdown",
     }
-
+    value = DropdownMetric(**value_with_options)
     psd_lf_metric = QCMetric(
         name=f"PSD (Low Frequency) {recording_name}",
         modality=Modality.ECEPHYS,
         stage=Stage.RAW,
         description=f"Evaluation of {recording_name} low-frequency power spectrum density",
         reference=str(psd_lf_path),
-        value=lf_value_with_flags,
+        value=value,
         status_history=[status_pending],
         tags=[recording_name, "PSD (Low Frequency)"]
     )
@@ -622,13 +623,14 @@ def generate_raw_qc(
         "status": ["Pass", "Fail"],
         "type": "dropdown",
     }
+    value = DropdownMetric(**value_with_options)
     rms_metric = QCMetric(
         name=f"RMS {recording_name}",
         modality=Modality.ECEPHYS,
         stage=Stage.RAW,
         description=f"Evaluation of {recording_name} RMS",
         reference=str(rms_path),
-        value=value_with_options,
+        value=value,
         status_history=[status_pass],
         tags=[recording_name, "RMS"]
     )
@@ -753,13 +755,14 @@ def generate_drift_qc(
         "status": ["Pass", "Fail", "Fail"],
         "type": "dropdown",
     }
+    value = DropdownMetric(**value_with_options)
     drift_metric = QCMetric(
         name=f"Probe Drift - {recording_name}",
         modality=Modality.ECEPHYS,
         stage=Stage.RAW,
         description=f"Evaluation of {recording_name} probe drift",
         reference=str(drift_map_path),
-        value=value_with_options,
+        value=value,
         status_history=[QCStatus(evaluator="", status=Status.PENDING, timestamp=datetime.now())],
         tags=[recording_name, "Probe Drift"]
         
@@ -956,9 +959,10 @@ def generate_event_qc(
                 "status": ["Pass", "Fail"],
                 "type": "dropdown",
             }
+            value = DropdownMetric(**value_with_options)
             saturation_status = status_pending
         else:
-            value_with_options = {"value": "Pass"}
+            value = {"value": "Pass"}
             saturation_status = status_pass
 
         saturation_timeline_metric = QCMetric(
@@ -967,7 +971,7 @@ def generate_event_qc(
             stage=Stage.RAW,
             description=f"Evaluation of {recording_name} saturation timeline",
             reference=str(fig_sat_time_path),
-            value=value_with_options,
+            value=value,
             status_history=[saturation_status],
             tags=[recording_name, "Saturation timeline"]
         )
@@ -1044,11 +1048,12 @@ def generate_event_qc(
                 "status": ["Pass", "Fail"],
                 "type": "dropdown",
             }
+            value = DropdownMetric(**value_with_options)
             events_status = status_pending
         else:
             logging.info(f"\tNo events found for {recording_name}")
 
-            value_with_options = {
+            value = {
                 "value": "Pass",
             }
             events_status = status_pass
@@ -1071,7 +1076,7 @@ def generate_event_qc(
             stage=Stage.RAW,
             description=f"Evaluation of {recording_name} trigger events",
             reference=str(fig_events_path),
-            value=value_with_options,
+            value=value,
             status_history=[events_status],
             tags=[recording_name, "Trigger events"]
         )
@@ -1286,13 +1291,14 @@ def generate_units_qc(
         "status": ["Pass", "Fail", "Fail"],
         "type": "dropdown",
     }
+    value = DropdownMetric(**value_with_options)
     yield_metric = QCMetric(
         name=f"Unit Metrics Yield - {recording_name}",
         modality=Modality.ECEPHYS,
         stage=Stage.PROCESSING,
         description=f"Evaluation of {recording_name} unit metrics yield. {sorting_summary_str}",
         reference=str(unit_yield_path),
-        value=value_with_options,
+        value=value,
         status_history=[status_pending],
         tags=[recording_name, "Unit Yield"]
     )
@@ -1310,13 +1316,14 @@ def generate_units_qc(
 
     curation_link_url = quote(curation_link)
 
-    sorting_curation_metric = QCMetric(
+    sorting_curation_metric = CurationMetric(
         name=f"Sorting Curation - {recording_name}",
+        type="Spike sorting curation",
         modality=Modality.ECEPHYS,
         stage=Stage.PROCESSING,
         description=f"Sorting Curation for {recording_name}",
         reference=curation_link_url,
-        value={},
+        value=[],
         status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
         tags=[recording_name, "Sorting Curation"]
     )
@@ -1330,12 +1337,13 @@ def generate_units_qc(
         "status": ["Pass" for area in ISI_VISUAL_AREAS],
         "type": "dropdown",
     }
+    value = DropdownMetric(**value_with_options)
     isi_visual_area_metric = QCMetric(
         name=f"Manual annotation of ISI Visual Area Label - {recording_name}",
         modality=Modality.ECEPHYS,
         stage=Stage.PROCESSING,
         description=f"Manual annotation of visual area label based on ISI imaging for {recording_name}",
-        value=value_with_options,
+        value=value,
         status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
         tags=[recording_name, "ISI Visual Area Label"]
     )
@@ -1382,15 +1390,16 @@ def generate_units_qc(
         "value": "",
         "options": ["No problems detected", "Seizure", "Firing Rate Gap"],
         "status": ["Pass", "Fail", "Fail"],
-        "type": "checkbox",
+        "type": "dropdown",
     }
+    value = DropdownMetric(**value_with_options)
     firing_rate_metric = QCMetric(
         name=f"Firing rate - {recording_name}",
         modality=Modality.ECEPHYS,
         stage=Stage.PROCESSING,
         description=f"Evaluation of {recording_name} firing rate",
         reference=str(firing_rate_path),
-        value=value_with_options,
+        value=value,
         status_history=[status_pending],
         tags=[recording_name, "Firing Rate"]
     )
