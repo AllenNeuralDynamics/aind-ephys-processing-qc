@@ -1,0 +1,17 @@
+{
+	"version": 1,
+	"parameters": [
+		{
+			"id": "FjVPYuKvTUQsfLOv",
+			"name": "compute event metrics",
+			"description": "Whether to compute event metrics (saturation+trigger)",
+			"type": "list",
+			"value_type": "string",
+			"default_value": "true",
+			"extra_data": [
+				"true",
+				"false"
+			]
+		}
+	]
+}
