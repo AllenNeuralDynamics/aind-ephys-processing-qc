@@ -223,9 +223,9 @@ if __name__ == "__main__":
         logging.info("Events from HARP not found. Trigger event metrics will not be generated.")
 
     # look for JSON files or loop through preprocessed
-    all_metrics = []
     recording_names = [jd["recording_name"] for jd in job_dicts]
     for job_dict in job_dicts:
+        all_metrics = []
         recording_name = job_dict["recording_name"]
         recording = si.load(job_dict["recording_dict"], base_folder=data_folder)
         skip_times = job_dict.get("skip_times", False)
@@ -275,6 +275,8 @@ if __name__ == "__main__":
             visualization_output=visualization_output,
         )
         all_metrics.extend(metrics_raw)
+        # set default grouping
+        default_grouping = metrics_raw[0].tags
 
         if COMPUTE_EVENT_METRIC:
             metrics_event, event_names = generate_event_qc(
@@ -310,7 +312,6 @@ if __name__ == "__main__":
 
         # make quality control with metric types as groups
         # probe/streams are added at aggregation
-        default_grouping = all_metrics[0].tags
         quality_control = QualityControl(
             metrics=all_metrics,
             default_grouping=default_grouping
