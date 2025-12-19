@@ -275,8 +275,6 @@ if __name__ == "__main__":
             visualization_output=visualization_output,
         )
         all_metrics.extend(metrics_raw)
-        # set default grouping
-        default_grouping = metrics_raw[0].tags
 
         if COMPUTE_EVENT_METRIC:
             metrics_event, event_names = generate_event_qc(
@@ -314,7 +312,7 @@ if __name__ == "__main__":
         # probe/streams are added at aggregation
         quality_control = QualityControl(
             metrics=all_metrics,
-            default_grouping=default_grouping
+            default_grouping=("stage", "probe")
         )
         quality_control.write_standard_file(output_directory=results_folder, suffix=f"_{recording_name}.json")
 

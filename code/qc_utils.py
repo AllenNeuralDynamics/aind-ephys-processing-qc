@@ -530,7 +530,9 @@ def generate_raw_qc(
         value=value,
         reference=str(raw_traces_path),
         status_history=[status_pending],
-        tags=[recording_name_abbrv]
+        tags={
+            "probe": recording_name_abbrv
+        }
     )
     metrics.append(raw_data_metric)
     metric_names.append("Raw Data")
@@ -562,7 +564,9 @@ def generate_raw_qc(
         reference=str(psd_wide_path),
         value=None,
         status_history=[status_pass],
-        tags=[recording_name_abbrv]
+        tags={
+            "probe": recording_name_abbrv
+        }
     )
     metrics.append(psd_wide_metric)
     metric_names.append("PSD (Wide Band)")
@@ -587,7 +591,9 @@ def generate_raw_qc(
         reference=str(psd_hf_path),
         value=value,
         status_history=[status_pending],
-        tags=[recording_name_abbrv]
+        tags={
+            "probe": recording_name_abbrv
+        }
     )
     metrics.append(psd_hf_metric)
     metric_names.append("PSD (High Frequency)")
@@ -612,7 +618,9 @@ def generate_raw_qc(
         reference=str(psd_lf_path),
         value=value,
         status_history=[status_pending],
-        tags=[recording_name_abbrv]
+        tags={
+            "probe": recording_name_abbrv
+        }
     )
     metrics.append(psd_lf_metric)
     metric_names.append("PSD (Low Frequency)")
@@ -672,7 +680,9 @@ def generate_raw_qc(
         reference=str(rms_path),
         value=value,
         status_history=[status_pass],
-        tags=[recording_name_abbrv]
+        tags={
+            "probe": recording_name_abbrv
+        }
     )
     metrics.append(rms_metric)
     metric_names.append("RMS")
@@ -809,7 +819,9 @@ def generate_drift_qc(
         reference=str(drift_map_path),
         value=value,
         status_history=[QCStatus(evaluator="", status=Status.PENDING, timestamp=datetime.now())],
-        tags=[recording_name_abbrv]
+        tags={
+            "probe": recording_name_abbrv
+        }
         
     )
     drift_metrics = [drift_metric]
@@ -924,7 +936,9 @@ def generate_event_qc(
             reference=str(fig_sat_time_path),
             value=value,
             status_history=[saturation_status],
-            tags=[recording_name_abbrv]
+            tags={
+            "probe": recording_name_abbrv
+        }
         )
 
         metrics.append(saturation_timeline_metric)
@@ -1024,7 +1038,9 @@ def generate_event_qc(
                 reference=str(fig_events_path),
                 value=value,
                 status_history=[events_status],
-                tags=[recording_name_abbrv]
+                tags={
+            "probe": recording_name_abbrv
+        }
             )
             metrics.append(trigger_event_metric)
             metric_names.append("Trigger events")
@@ -1255,7 +1271,9 @@ def generate_units_qc(
         reference=str(unit_yield_path),
         value=value,
         status_history=[status_pending],
-        tags=[recording_name_abbrv]
+        tags={
+            "probe": recording_name_abbrv
+        }
     )
     metrics.append(yield_metric)
     metric_names.append("Unit Yield")
@@ -1316,7 +1334,9 @@ def generate_units_qc(
         reference=str(firing_rate_path),
         value=value,
         status_history=[status_pending],
-        tags=[recording_name_abbrv]
+        tags={
+            "probe": recording_name_abbrv
+        }
     )
     metrics.append(firing_rate_metric)
     metric_names.append("Firing Rate")
@@ -1346,7 +1366,9 @@ def generate_units_qc(
         reference=curation_link_url,
         value=[],
         status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
-        tags=[recording_name_abbrv]
+        tags={
+            "probe": recording_name_abbrv
+        }
     )
     metrics.append(sorting_curation_metric)
     metric_names.append("Sorting Curation")
