@@ -232,17 +232,12 @@ def plot_raw_data(
 
 def plot_psd(
     recording: si.BaseRecording,
-    recording_lfp: si.BaseRecording | None = None,
     num_snippets_per_segment: int = 3,
     duration_s: float = 1,
-    freq_lf_filt: float = 500.0,
-    freq_lf_viz: float = 100.0,
-    freq_hf_filt: float = 3000.0,
-    freq_hf_viz: float = 5000.0,
     channel_labels: np.ndarray | None = None
 ):
     """
-    Plot spectra for wide/band, low frequency, and high frequency.
+    Plot spectra for wide-band.
 
     Parameters
     ----------
@@ -259,24 +254,10 @@ def plot_psd(
     -------
     matplotlib.figure.Figure
         Figure object containing the wide-band frequency spectrum.
-    matplotlib.figure.Figure
-        Figure object containing the high frequency spectrum.
-    matplotlib.figure.Figure
-        Figure object containing the low frequency spectrum.
     """
     num_segments = recording.get_num_segments()
     fig_psd, axs_psd = _get_fig_axs(num_segments * 2, num_snippets_per_segment)
-    fig_psd_hf, axs_psd_hf = _get_fig_axs(num_segments * 2, num_snippets_per_segment)
-    fig_psd_lf, axs_psd_lf = _get_fig_axs(num_segments * 2, num_snippets_per_segment)
 
-    if recording_lfp is None:
-        recording_lfp = recording
-        recording_lfp = spre.bandpass_filter(recording, freq_min=0.1, freq_max=freq_lf_filt)
-        target_lfp_sampling = int(1.5 * freq_lf_filt)
-        decimate_factor = int(recording.sampling_frequency / target_lfp_sampling)
-        recording_lfp = spre.decimate(recording_lfp, decimate_factor)
-    else:
-        recording_lfp = spre.bandpass_filter(recording_lfp, freq_min=0.1, freq_max=freq_lf_filt)
     depths = recording.get_channel_locations()[:, 1]
 
     surface_channel_y_position = _get_surface_channel(recording, channel_labels)
@@ -288,105 +269,45 @@ def plot_psd(
         for snippet_index, t_start in enumerate(t_starts):
             ax_psd = axs_psd[segment_index * 2, snippet_index]
             ax_psd_channels = axs_psd[segment_index * 2 + 1, snippet_index]
-            ax_psd_hf = axs_psd_hf[segment_index * 2, snippet_index]
-            ax_psd_hf_channels = axs_psd_hf[segment_index * 2 + 1, snippet_index]
-            ax_psd_lf = axs_psd_lf[segment_index * 2, snippet_index]
-            ax_psd_lf_channels = axs_psd_lf[segment_index * 2 + 1, snippet_index]
 
-            start_frame_hf = recording.time_to_sample_index(t_start, segment_index=segment_index)
-            end_frame_hf = recording.time_to_sample_index(t_start + duration_s, segment_index=segment_index)
-            traces_wide = recording.get_traces(
-                start_frame=start_frame_hf, end_frame=end_frame_hf, segment_index=segment_index, return_scaled=True
+            start_frame = recording.time_to_sample_index(t_start, segment_index=segment_index)
+            end_frame = recording.time_to_sample_index(t_start + duration_s, segment_index=segment_index)
+            traces = recording.get_traces(
+                start_frame=start_frame, end_frame=end_frame, segment_index=segment_index, return_scaled=True
             )
 
-            start_frame_lf = recording_lfp.time_to_sample_index(t_start, segment_index=segment_index)
-            end_frame_lf = recording_lfp.time_to_sample_index(t_start + duration_s, segment_index=segment_index)
-            traces_lf = recording_lfp.get_traces(
-                start_frame=start_frame_lf, end_frame=end_frame_lf, segment_index=segment_index, return_scaled=True
-            )
-            power_channels_wide = []
-            power_channels_lf = []
+            power_channels = []
 
-            for i in range(traces_wide.shape[1]):
-                f_wide, p_wide = welch(traces_wide[:, i], fs=recording.sampling_frequency)
-                power_channels_wide.append(p_wide)
-                ax_psd.plot(f_wide, p_wide, color="gray", alpha=0.5)
+            for i in range(traces.shape[1]):
+                f, p = welch(traces[:, i], fs=recording.sampling_frequency)
+                power_channels.append(p)
+                ax_psd.plot(f, p, color="gray", alpha=0.5)
 
-                f_lfp, p_lfp = welch(traces_lf[:, i], fs=recording_lfp.sampling_frequency)
-                power_channels_lf.append(p_lfp)
+            power_channels = np.array(power_channels)
 
-                hf_mask = f_wide > freq_hf_viz
-                f_hf = f_wide[hf_mask]
-                ax_psd_hf.plot(f_hf, p_wide[hf_mask], color="gray", alpha=0.5)
+            p_mean = np.mean(power_channels, axis=0)
+            ax_psd.plot(f, p_mean, color="k", lw=1)
 
-                lf_mask = f_lfp < freq_lf_viz
-                f_lf = f_lfp[lf_mask]
-                ax_psd_lf.plot(f_lf, p_lfp[lf_mask], color="gray", alpha=0.5)
-
-            power_channels_wide = np.array(power_channels_wide)
-            power_channels_lf = np.array(power_channels_lf)
-
-            p_wide_mean = np.mean(power_channels_wide, axis=0)
-            ax_psd.plot(f_wide, p_wide_mean, color="k", lw=1)
-            ax_psd_hf.plot(f_hf, p_wide_mean[hf_mask], color="k", lw=1)
-            p_lfp_mean = np.mean(power_channels_lf, axis=0)
-            ax_psd_lf.plot(f_lf, p_lfp_mean[lf_mask], color="k", lw=1)
-
-            extent_wide = [f_wide.min(), f_wide.max(), np.min(depths), np.max(depths)]
+            extent = [f.min(), f.max(), np.min(depths), np.max(depths)]
             ax_psd_channels.imshow(
-                power_channels_wide, extent=extent_wide, aspect="auto", cmap="inferno", origin="lower", norm="log"
-            )
-            extent_hf = [f_hf.min(), f_hf.max(), np.min(depths), np.max(depths)]
-            ax_psd_hf_channels.imshow(
-                power_channels_wide[:, hf_mask],
-                extent=extent_hf,
-                aspect="auto",
-                cmap="inferno",
-                origin="lower",
-                norm="log",
-            )
-            extent_lf = [f_lf.min(), f_lf.max(), np.min(depths), np.max(depths)]
-            ax_psd_lf_channels.imshow(
-                power_channels_lf[:, lf_mask],
-                extent=extent_lf,
-                aspect="auto",
-                cmap="inferno",
-                origin="lower",
-                norm="log",
+                power_channels, extent=extent, aspect="auto", cmap="inferno", origin="lower", norm="log"
             )
             ax_psd.set_title(f"seg{segment_index} @ {t_start}s")
-            ax_psd_hf.set_title(f"seg{segment_index} @ {t_start}s")
-            ax_psd_lf.set_title(f"seg{segment_index} @ {t_start}s")
             if snippet_index == 0:
                 ax_psd.set_ylabel("Power ($\mu V^2/Hz$)")
-                ax_psd_hf.set_ylabel("Power ($\mu V^2/Hz$)")
-                ax_psd_lf.set_ylabel("Power ($\mu V^2/Hz$)")
-
                 ax_psd_channels.set_ylabel("Depth ($\mu$ m)")
-                ax_psd_hf_channels.set_ylabel("Depth ($\mu$ m)")
-                ax_psd_lf_channels.set_ylabel("Depth ($\mu$ m)")
             if segment_index == num_segments - 1:
                 ax_psd_channels.set_xlabel("Frequency (Hz)")
-                ax_psd_hf_channels.set_xlabel("Frequency (Hz)")
-                ax_psd_lf_channels.set_xlabel("Frequency (Hz)")
 
             ax_psd.set_yscale("log")
-            ax_psd_hf.set_yscale("log")
-            ax_psd_lf.set_yscale("log")
 
             if surface_channel_y_position is not None:
                 ax_psd_channels.axhline(y=surface_channel_y_position, c='g')
-                ax_psd_hf_channels.axhline(y=surface_channel_y_position, c='g')
-                ax_psd_lf_channels.axhline(y=surface_channel_y_position, c='g')
 
     fig_psd.subplots_adjust(wspace=0.3, hspace=0.3, top=0.8)
-    fig_psd_hf.subplots_adjust(wspace=0.3, hspace=0.3, top=0.8)
-    fig_psd_lf.subplots_adjust(wspace=0.3, hspace=0.3, top=0.8)
-    fig_psd.suptitle("Wideband")
-    fig_psd_hf.suptitle("High-frequency")
-    fig_psd_lf.suptitle("Low-frequency")
+    fig_psd.suptitle("PSD - Wideband")
 
-    return fig_psd, fig_psd_hf, fig_psd_lf
+    return fig_psd
 
 
 def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None, channel_labels: np.ndarray | None = None):
@@ -437,6 +358,7 @@ def generate_raw_qc(
     recording_preprocessed: si.BaseRecording | None = None,
     processing: Processing | None = None,
     visualization_output: dict | None = None,
+    allow_failed_metrics: bool = False
 ) -> dict[str : list[QCMetric]]:
     """
     Generate raw data quality control metrics for a given recording.
@@ -538,93 +460,40 @@ def generate_raw_qc(
     metric_names.append("Raw Data")
 
     logging.info("Generating PSD metrics")
-    fig_psd_wide, fig_psd_hf, fig_psd_lf = plot_psd(recording, recording_lfp=recording_lfp, channel_labels=channel_labels)
-    psd_wide_path = recording_fig_folder / "psd_wide.png"
-    psd_hf_path = recording_fig_folder / "psd_hf.png"
-    psd_lf_path = recording_fig_folder / "psd_lf.png"
+    fig_psd = plot_psd(recording, channel_labels=channel_labels)
+    psd_path = recording_fig_folder / "psd.png"
 
-    fig_psd_wide.savefig(psd_wide_path, dpi=300)
-    fig_psd_hf.savefig(psd_hf_path, dpi=300)
-    fig_psd_lf.savefig(psd_lf_path, dpi=300)
+    fig_psd.savefig(psd_path, dpi=300)
 
     if relative_to is not None:
-        psd_wide_path = psd_wide_path.relative_to(relative_to)
-        psd_hf_path = psd_hf_path.relative_to(relative_to)
-        psd_lf_path = psd_lf_path.relative_to(relative_to)
+        psd_path = psd_path.relative_to(relative_to)
 
-    psd_wide_metric_description = (
+    value_with_options = {
+        "value": "",
+        "options": ["No contamination", "High frequency contamination", "Line contamination"],
+        "status": ["Pass", "Fail", "Fail"],
+        "type": "dropdown",
+    }
+    value = DropdownMetric(**value_with_options)
+    psd_metric_description = (
         "This metric displays the power spectral density (PSD) of raw data. "
-        "PDSs are computed by channel and shown as lines or map (by channel depth)."
+        "PDSs are computed by channel and shown as lines or map (by channel depth). "
+        "Use the plots to spot contamination from high-frequency or line noise sources."
     )
-    psd_wide_metric = QCMetric(
-        name=f"PSD (Wide Band) {recording_name_abbrv}",
+    psd_metric = QCMetric(
+        name=f"PSD {recording_name_abbrv}",
         modality=Modality.ECEPHYS,
         stage=Stage.RAW,
-        description=psd_wide_metric_description,
-        reference=str(psd_wide_path),
+        description=psd_metric_description,
+        reference=str(psd_path),
         value=None,
         status_history=[status_pass],
         tags={
             "probe": recording_name_abbrv
         }
     )
-    metrics.append(psd_wide_metric)
-    metric_names.append("PSD (Wide Band)")
-
-    value_with_options = {
-        "value": "",
-        "options": ["No contamination", "High frequency contamination"],
-        "status": ["Pass", "Fail"],
-        "type": "dropdown",
-    }
-    value = DropdownMetric(**value_with_options)
-    psd_hf_metric_description = (
-        "This metric displays the power spectral density (PSD) of raw data in the "
-        "high frequency range. PDSs are computed by channel and shown as lines or map (by channel depth). "
-        "Use the plots to spot contamination from high-frequency noise sources."
-    )
-    psd_hf_metric = QCMetric(
-        name=f"PSD (High Frequency) {recording_name_abbrv}",
-        modality=Modality.ECEPHYS,
-        stage=Stage.RAW,
-        description=psd_hf_metric_description,
-        reference=str(psd_hf_path),
-        value=value,
-        status_history=[status_pending],
-        tags={
-            "probe": recording_name_abbrv
-        }
-    )
-    metrics.append(psd_hf_metric)
-    metric_names.append("PSD (High Frequency)")
-
-    value_with_options = {
-        "value": "",
-        "options": ["No contamination", "Line (60 Hz) contamination"],
-        "status": ["Pass", "Fail"],
-        "type": "dropdown",
-    }
-    value = DropdownMetric(**value_with_options)
-    psd_lf_metric_description = (
-        "This metric displays power spectral density (PSD) of raw data in the "
-        "low frequency range. PDSs are computed by channel and shown as lines or map (by channel depth). "
-        "Use the plots to spot line contamination (60 Hz)."
-    )
-    psd_lf_metric = QCMetric(
-        name=f"PSD (Low Frequency) {recording_name_abbrv}",
-        modality=Modality.ECEPHYS,
-        stage=Stage.RAW,
-        description=psd_lf_metric_description,
-        reference=str(psd_lf_path),
-        value=value,
-        status_history=[status_pending],
-        tags={
-            "probe": recording_name_abbrv
-        }
-    )
-    metrics.append(psd_lf_metric)
-    metric_names.append("PSD (Low Frequency)")
-    
+    metrics.append(psd_metric)
+    metric_names.append("PSD")
 
     logging.info("Generating NOISE metrics")
     fig_rms, ax_rms = plot_rms_by_depth(recording, recording_preprocessed, channel_labels=channel_labels)

@@ -26,6 +26,7 @@ except ImportError:
 from qc_utils import (
     load_preprocessed_recording,
     load_processing_metadata,
+    recording_abbrv_name,
     generate_raw_qc,
     generate_units_qc,
     generate_drift_qc,
@@ -44,6 +45,14 @@ skip_event_group.add_argument("--no-event-metrics", action="store_true", help=sk
 skip_event_group.add_argument("static_compute_event", nargs="?", default="true", help=skip_event_group_help)
 
 
+min_duration_allow_failed_group = parser.add_mutually_exclusive_group()
+min_duration_allow_failed_help = (
+    "Minimum recording duration below which metrics will be allowed to fail. Default: 300"
+)
+min_duration_allow_failed_group.add_argument("static_min_duration_allow_failed", nargs="?", default=None, help=min_duration_allow_failed_help)
+min_duration_allow_failed_group.add_argument("--min-duration-allow-failed", default=None, help=min_duration_allow_failed_help)
+
+
 if __name__ == "__main__":
     t_qc_start_all = time.perf_counter()
 
@@ -52,6 +61,10 @@ if __name__ == "__main__":
         args.static_compute_event.lower() == "true" if args.static_compute_event
         else not args.no_event_metrics
     )
+    MIN_DURATION_ALLOW_FAILED = args.static_min_duration_allow_failed or args.min_duration_allow_failed
+    if MIN_DURATION_ALLOW_FAILED is None:
+        MIN_DURATION_ALLOW_FAILED = 0
+    MIN_DURATION_ALLOW_FAILED = float(MIN_DURATION_ALLOW_FAILED)
 
     # pipeline mode VS capsule mode
     ecephys_folders = [
@@ -90,6 +103,7 @@ if __name__ == "__main__":
 
     logging.info(f"Running Ephys QC with the following parameters:")
     logging.info(f"\tCOMPUTE EVENT METRICS: {COMPUTE_EVENT_METRIC}")
+    logging.info(f"\tMIN DURATION ALLOW FAILED: {MIN_DURATION_ALLOW_FAILED}")
 
     # Use CO_CPUS/SLURM_CPUS_ON_NODE env variable if available
     N_JOBS_EXT = os.getenv("CO_CPUS") or os.getenv("SLURM_CPUS_ON_NODE")
@@ -293,7 +307,11 @@ if __name__ == "__main__":
             motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
 
             metrics_drift, drift_names = generate_drift_qc(
-                recording, recording_name, motion_path, quality_control_fig_folder, relative_to=results_folder
+                recording,
+                recording_name,
+                motion_path,
+                quality_control_fig_folder,
+                relative_to=results_folder,
             )
             all_metrics.extend(metrics_drift)
         
@@ -304,15 +322,26 @@ if __name__ == "__main__":
                 quality_control_fig_folder,
                 relative_to=results_folder,
                 visualization_output=visualization_output,
-                raw_recording=recording
+                raw_recording=recording,
             )
             all_metrics.extend(metrics_units)
+
+        # If recording is too short, allow tagged metrics to fail
+        if recording.get_total_duration() < MIN_DURATION_ALLOW_FAILED:
+            logging.info(
+                f"Recording {recording_name} duration below {MIN_DURATION_ALLOW_FAILED}. "
+                f"Adding it to allow_tag_failures."
+            )
+            allow_tag_failures = [recording_abbrv_name(recording_name)]
+        else:
+            allow_tag_failures = []
 
         # make quality control with metric types as groups
         # probe/streams are added at aggregation
         quality_control = QualityControl(
             metrics=all_metrics,
-            default_grouping=("stage", "probe")
+            default_grouping=("stage", "probe"),
+            allow_tag_failures=allow_tag_failures
         )
         quality_control.write_standard_file(output_directory=results_folder, suffix=f"_{recording_name}.json")
 
