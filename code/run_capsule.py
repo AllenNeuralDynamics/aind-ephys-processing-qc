@@ -2,6 +2,7 @@
 
 import os
 import sys
+import argparse
 import shutil
 import json
 import numpy as np
@@ -14,7 +15,7 @@ import spikeinterface as si
 
 # AIND
 from aind_data_schema_models.modalities import Modality
-from aind_data_schema.core.quality_control import QualityControl, QCEvaluation, Stage
+from aind_data_schema.core.quality_control import QualityControl, Stage
 
 try:
     from aind_log_utils import log
@@ -25,6 +26,7 @@ except ImportError:
 from qc_utils import (
     load_preprocessed_recording,
     load_processing_metadata,
+    recording_abbrv_name,
     generate_raw_qc,
     generate_units_qc,
     generate_drift_qc,
@@ -34,17 +36,35 @@ from qc_utils import (
 data_folder = Path("../data")
 results_folder = Path("../results")
 
+# Define argument parser
+parser = argparse.ArgumentParser(description="Compute Quality Control for Ephys pipeline")
+
+skip_event_group = parser.add_mutually_exclusive_group()
+skip_event_group_help = "Whether to compute event metrics (saturation+trigger). Default: True"
+skip_event_group.add_argument("--no-event-metrics", action="store_true", help=skip_event_group_help)
+skip_event_group.add_argument("static_compute_event", nargs="?", default="true", help=skip_event_group_help)
+
+
+min_duration_allow_failed_group = parser.add_mutually_exclusive_group()
+min_duration_allow_failed_help = (
+    "Minimum recording duration below which metrics will be allowed to fail. Default: 300"
+)
+min_duration_allow_failed_group.add_argument("static_min_duration_allow_failed", nargs="?", default=None, help=min_duration_allow_failed_help)
+min_duration_allow_failed_group.add_argument("--min-duration-allow-failed", default=None, help=min_duration_allow_failed_help)
+
 
 if __name__ == "__main__":
     t_qc_start_all = time.perf_counter()
 
-    # Get the total size of the shared memory filesystem
-    shm_stat = os.statvfs('/dev/shm')
-    total_shm = shm_stat.f_frsize * shm_stat.f_blocks  # Total size in bytes
-    free_shm = shm_stat.f_frsize * shm_stat.f_bfree    # Free size in bytes
-
-    print(f"Total /dev/shm size: {total_shm / 1024**3:.2f} GB")
-    print(f"Free /dev/shm size: {free_shm / 1024**3:.2f} GB")
+    args = parser.parse_args()
+    COMPUTE_EVENT_METRIC = (
+        args.static_compute_event.lower() == "true" if args.static_compute_event
+        else not args.no_event_metrics
+    )
+    MIN_DURATION_ALLOW_FAILED = args.static_min_duration_allow_failed or args.min_duration_allow_failed
+    if MIN_DURATION_ALLOW_FAILED is None:
+        MIN_DURATION_ALLOW_FAILED = 0
+    MIN_DURATION_ALLOW_FAILED = float(MIN_DURATION_ALLOW_FAILED)
 
     # pipeline mode VS capsule mode
     ecephys_folders = [
@@ -81,7 +101,9 @@ if __name__ == "__main__":
     else:
         logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
 
-    logging.info("\nEPHYS QC")
+    logging.info(f"Running Ephys QC with the following parameters:")
+    logging.info(f"\tCOMPUTE EVENT METRICS: {COMPUTE_EVENT_METRIC}")
+    logging.info(f"\tMIN DURATION ALLOW FAILED: {MIN_DURATION_ALLOW_FAILED}")
 
     # Use CO_CPUS/SLURM_CPUS_ON_NODE env variable if available
     N_JOBS_EXT = os.getenv("CO_CPUS") or os.getenv("SLURM_CPUS_ON_NODE") or os.getenv("SLURM_CPUS_PER_TASK")
@@ -177,7 +199,10 @@ if __name__ == "__main__":
     if ecephys_sorted_folder is not None:
         processing_json_file = ecephys_sorted_folder / "processing.json"
         if processing_json_file.is_file():
-            processing = load_processing_metadata(processing_json_file)
+            try:
+                processing = load_processing_metadata(processing_json_file)
+            except:
+                logging.info(f"Failed to load processing.json")
 
         visualization_json_file = ecephys_sorted_folder / "visualization_output.json"
         if visualization_json_file.is_file():
@@ -212,10 +237,9 @@ if __name__ == "__main__":
         logging.info("Events from HARP not found. Trigger event metrics will not be generated.")
 
     # look for JSON files or loop through preprocessed
+    recording_names = [jd["recording_name"] for jd in job_dicts]
     for job_dict in job_dicts:
-        all_metrics_raw = {}
-        all_metrics_processed = {}
-
+        all_metrics = []
         recording_name = job_dict["recording_name"]
         recording = si.load(job_dict["recording_dict"], base_folder=data_folder)
         skip_times = job_dict.get("skip_times", False)
@@ -244,7 +268,7 @@ if __name__ == "__main__":
             postprocessed_folder_zarr = ecephys_sorted_folder / "postprocessed" / f"{recording_name}.zarr"
             postprocessed_folder = ecephys_sorted_folder / "postprocessed" / recording_name
             if postprocessed_folder_zarr.is_dir():
-                sorting_analyzer = si.load(postprocessed_folder_zarr)
+                sorting_analyzer = si.load(postprocessed_folder_zarr, load_extensions=False)
             elif postprocessed_folder.is_dir():
                 # this is for legacy waveform extractor folders
                 sorting_analyzer = si.load_waveforms(postprocessed_folder, output="SortingAnalyzer")
@@ -254,7 +278,7 @@ if __name__ == "__main__":
 
         quality_control_fig_folder = results_folder / f"quality_control_{recording_name}"
         
-        metrics_raw = generate_raw_qc(
+        metrics_raw, raw_names = generate_raw_qc(
             recording,
             recording_name,
             quality_control_fig_folder,
@@ -264,73 +288,62 @@ if __name__ == "__main__":
             processing=processing,
             visualization_output=visualization_output,
         )
-        
-        metrics_event = generate_event_qc(
-            recording,
-            recording_name,
-            quality_control_fig_folder,
-            relative_to=results_folder,
-            event_dict=event_dict,
-            event_keys=["licktime", "optogeneticstime"],
-        )
-        metrics_raw.update(metrics_event)
+        all_metrics.extend(metrics_raw)
+
+        if COMPUTE_EVENT_METRIC:
+            metrics_event, event_names = generate_event_qc(
+                recording,
+                recording_name,
+                quality_control_fig_folder,
+                relative_to=results_folder,
+                event_dict=event_dict,
+                event_keys=["licktime", "optogeneticstime"],
+            )
+            all_metrics.extend(metrics_event)
+        else:
+            logging.info("Skipping computation of event metrics.")
         
         if ecephys_sorted_folder is not None:
             motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
 
-            metrics_drift = generate_drift_qc(
-                recording, recording_name, motion_path, quality_control_fig_folder, relative_to=results_folder
+            metrics_drift, drift_names = generate_drift_qc(
+                recording,
+                recording_name,
+                motion_path,
+                quality_control_fig_folder,
+                relative_to=results_folder,
             )
-            metrics_raw.update(metrics_drift)
-
-        for evaluation_name, metric_list in metrics_raw.items():
-            if evaluation_name in all_metrics_raw:
-                all_metrics_raw[evaluation_name].extend(metric_list)
-            else:
-                all_metrics_raw[evaluation_name] = metric_list
+            all_metrics.extend(metrics_drift)
         
         if ecephys_sorted_folder is not None:
-            metrics_processed = generate_units_qc(
+            metrics_units, units_names = generate_units_qc(
                 sorting_analyzer,
                 recording_name,
                 quality_control_fig_folder,
                 relative_to=results_folder,
                 visualization_output=visualization_output,
+                raw_recording=recording,
             )
+            all_metrics.extend(metrics_units)
 
-            for evaluation_name, metric_list in metrics_processed.items():
-                if evaluation_name in all_metrics_processed:
-                    all_metrics_processed[evaluation_name].extend(metric_list)
-                else:
-                    all_metrics_processed[evaluation_name] = metric_list
-
-        # generate evaluations
-        evaluations = []
-        for evaluation_name, metrics in all_metrics_raw.items():
-            evaluation = QCEvaluation(
-                modality=Modality.ECEPHYS,
-                stage=Stage.RAW,
-                name=evaluation_name,
-                description=evaluation_name,
-                metrics=metrics,
+        # If recording is too short, allow tagged metrics to fail
+        if recording.get_total_duration() < MIN_DURATION_ALLOW_FAILED:
+            logging.info(
+                f"Recording {recording_name} duration below {MIN_DURATION_ALLOW_FAILED}. "
+                f"Adding it to allow_tag_failures."
             )
-            evaluations.append(evaluation)
+            allow_tag_failures = [recording_abbrv_name(recording_name)]
+        else:
+            allow_tag_failures = []
 
-        for evaluation_name, metrics in all_metrics_processed.items():
-            evaluation = QCEvaluation(
-                modality=Modality.ECEPHYS,
-                stage=Stage.PROCESSING,
-                name=evaluation_name,
-                description=evaluation_name,
-                metrics=metrics,
-            )
-            evaluations.append(evaluation)
-
-        # make quality control
-        quality_control = QualityControl(evaluations=evaluations)
-
-        with (results_folder / f"quality_control_{recording_name}.json").open("w") as f:
-            f.write(quality_control.model_dump_json(indent=3))
+        # make quality control with metric types as groups
+        # probe/streams are added at aggregation
+        quality_control = QualityControl(
+            metrics=all_metrics,
+            default_grouping=("stage", "probe"),
+            allow_tag_failures=allow_tag_failures
+        )
+        quality_control.write_standard_file(output_directory=results_folder, suffix=f"_{recording_name}.json")
 
     t_qc_end_all = time.perf_counter()
     elapsed_time_qc_all = np.round(t_qc_end_all - t_qc_start_all, 2)

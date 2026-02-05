@@ -1,11 +1,8 @@
-# hash:sha256:46127c775cd6fe43e5b9fa8054acdc872199aa78f4a83fd7949f31a8e0ae377b
+# hash:sha256:3c364a884735ee73aa9a180ff6a3c4388b0b0d30dd8a86922d3e6a0a022474c4
 ARG REGISTRY_HOST
 FROM $REGISTRY_HOST/codeocean/mambaforge3:23.1.0-4-python3.10.12-ubuntu22.04
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG AWS_ACCESS_KEY_ID
-ARG AWS_DEFAULT_REGION
-ARG AWS_SECRET_ACCESS_KEY
 ARG GIT_ASKPASS
 COPY git-askpass /
 
@@ -15,9 +12,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install -U --no-cache-dir \
-    aind-data-schema==1.3.0 \
+    aind-data-schema==2.4.0 \
     aind-log-utils==0.2.3 \
-    aind-qcportal-schema==0.4.0 \
+    aind-qcportal-schema==0.6.4 \
     s3fs==2025.5.1 \
     spikeinterface[full,widgets]==0.103.0 \
     wavpack-numcodecs==0.2.2

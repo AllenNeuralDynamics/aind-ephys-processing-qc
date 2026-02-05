@@ -1,0 +1,25 @@
+{
+	"version": 1,
+	"parameters": [
+		{
+			"id": "FjVPYuKvTUQsfLOv",
+			"name": "compute event metrics",
+			"description": "Whether to compute event metrics (saturation+trigger)",
+			"type": "list",
+			"value_type": "string",
+			"default_value": "true",
+			"extra_data": [
+				"true",
+				"false"
+			]
+		},
+		{
+			"id": "bUKNsaXWN8aQnBc3",
+			"name": "min duration to allow failure",
+			"description": "Minimum recording duration below which metrics will be allowed to fail. Default: 300",
+			"type": "text",
+			"value_type": "string",
+			"default_value": "300"
+		}
+	]
+}
