@@ -20,8 +20,21 @@ from aind_data_schema_models.modalities import Modality
 
 from aind_data_schema.core.processing import Processing
 from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status, Stage, CurationMetric
+from aind_qcportal_schema.metric_value import DropdownMetric
 
-ISI_VISUAL_AREAS = ["VISp", "VISa", "VISal", "VISam", "VISl", "VISli", "VISpl", "VISpm", "VISpor", "VISrl", "VIS"]
+# TODO: add proper descriptions
+
+
+def recording_abbrv_name(recording_name):
+    """
+    Abbreviates recording name from Open Ephys stream by removing Record Node and Plugin source from the name.
+    """
+    import re
+    if "Record Node" in recording_name:
+        return re.sub(r'Record Node [^#]+#Neuropix-PXI-\d+\.', '', recording_name)
+    else:
+        return recording_name
+
 
 def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
     figsize = (subplot_figsize[0] * ncols, subplot_figsize[1] * nrows)
@@ -172,6 +185,7 @@ def plot_raw_data(
             sw.plot_traces(
                 recording_hp,
                 time_range=[t_start, t_start + duration_s],
+                segment_index=segment_index,
                 mode="map",
                 return_scaled=True,
                 with_colorbar=True,
@@ -181,6 +195,7 @@ def plot_raw_data(
             sw.plot_traces(
                 recording_lfp,
                 time_range=[t_start, t_start + duration_s],
+                segment_index=segment_index,
                 mode="map",
                 return_scaled=True,
                 with_colorbar=True,
@@ -217,17 +232,12 @@ def plot_raw_data(
 
 def plot_psd(
     recording: si.BaseRecording,
-    recording_lfp: si.BaseRecording | None = None,
     num_snippets_per_segment: int = 3,
     duration_s: float = 1,
-    freq_lf_filt: float = 500.0,
-    freq_lf_viz: float = 100.0,
-    freq_hf_filt: float = 3000.0,
-    freq_hf_viz: float = 5000.0,
     channel_labels: np.ndarray | None = None
 ):
     """
-    Plot spectra for wide/band, low frequency, and high frequency.
+    Plot spectra for wide-band.
 
     Parameters
     ----------
@@ -244,24 +254,10 @@ def plot_psd(
     -------
     matplotlib.figure.Figure
         Figure object containing the wide-band frequency spectrum.
-    matplotlib.figure.Figure
-        Figure object containing the high frequency spectrum.
-    matplotlib.figure.Figure
-        Figure object containing the low frequency spectrum.
     """
     num_segments = recording.get_num_segments()
     fig_psd, axs_psd = _get_fig_axs(num_segments * 2, num_snippets_per_segment)
-    fig_psd_hf, axs_psd_hf = _get_fig_axs(num_segments * 2, num_snippets_per_segment)
-    fig_psd_lf, axs_psd_lf = _get_fig_axs(num_segments * 2, num_snippets_per_segment)
 
-    if recording_lfp is None:
-        recording_lfp = recording
-        recording_lfp = spre.bandpass_filter(recording, freq_min=0.1, freq_max=freq_lf_filt)
-        target_lfp_sampling = int(1.5 * freq_lf_filt)
-        decimate_factor = int(recording.sampling_frequency / target_lfp_sampling)
-        recording_lfp = spre.decimate(recording_lfp, decimate_factor)
-    else:
-        recording_lfp = spre.bandpass_filter(recording_lfp, freq_min=0.1, freq_max=freq_lf_filt)
     depths = recording.get_channel_locations()[:, 1]
 
     surface_channel_y_position = _get_surface_channel(recording, channel_labels)
@@ -273,105 +269,45 @@ def plot_psd(
         for snippet_index, t_start in enumerate(t_starts):
             ax_psd = axs_psd[segment_index * 2, snippet_index]
             ax_psd_channels = axs_psd[segment_index * 2 + 1, snippet_index]
-            ax_psd_hf = axs_psd_hf[segment_index * 2, snippet_index]
-            ax_psd_hf_channels = axs_psd_hf[segment_index * 2 + 1, snippet_index]
-            ax_psd_lf = axs_psd_lf[segment_index * 2, snippet_index]
-            ax_psd_lf_channels = axs_psd_lf[segment_index * 2 + 1, snippet_index]
 
-            start_frame_hf = recording.time_to_sample_index(t_start, segment_index=segment_index)
-            end_frame_hf = recording.time_to_sample_index(t_start + duration_s, segment_index=segment_index)
-            traces_wide = recording.get_traces(
-                start_frame=start_frame_hf, end_frame=end_frame_hf, segment_index=segment_index, return_scaled=True
+            start_frame = recording.time_to_sample_index(t_start, segment_index=segment_index)
+            end_frame = recording.time_to_sample_index(t_start + duration_s, segment_index=segment_index)
+            traces = recording.get_traces(
+                start_frame=start_frame, end_frame=end_frame, segment_index=segment_index, return_scaled=True
             )
 
-            start_frame_lf = recording_lfp.time_to_sample_index(t_start, segment_index=segment_index)
-            end_frame_lf = recording_lfp.time_to_sample_index(t_start + duration_s, segment_index=segment_index)
-            traces_lf = recording_lfp.get_traces(
-                start_frame=start_frame_lf, end_frame=end_frame_lf, segment_index=segment_index, return_scaled=True
-            )
-            power_channels_wide = []
-            power_channels_lf = []
+            power_channels = []
 
-            for i in range(traces_wide.shape[1]):
-                f_wide, p_wide = welch(traces_wide[:, i], fs=recording.sampling_frequency)
-                power_channels_wide.append(p_wide)
-                ax_psd.plot(f_wide, p_wide, color="gray", alpha=0.5)
+            for i in range(traces.shape[1]):
+                f, p = welch(traces[:, i], fs=recording.sampling_frequency)
+                power_channels.append(p)
+                ax_psd.plot(f, p, color="gray", alpha=0.5)
 
-                f_lfp, p_lfp = welch(traces_lf[:, i], fs=recording_lfp.sampling_frequency)
-                power_channels_lf.append(p_lfp)
+            power_channels = np.array(power_channels)
 
-                hf_mask = f_wide > freq_hf_viz
-                f_hf = f_wide[hf_mask]
-                ax_psd_hf.plot(f_hf, p_wide[hf_mask], color="gray", alpha=0.5)
+            p_mean = np.mean(power_channels, axis=0)
+            ax_psd.plot(f, p_mean, color="k", lw=1)
 
-                lf_mask = f_lfp < freq_lf_viz
-                f_lf = f_lfp[lf_mask]
-                ax_psd_lf.plot(f_lf, p_lfp[lf_mask], color="gray", alpha=0.5)
-
-            power_channels_wide = np.array(power_channels_wide)
-            power_channels_lf = np.array(power_channels_lf)
-
-            p_wide_mean = np.mean(power_channels_wide, axis=0)
-            ax_psd.plot(f_wide, p_wide_mean, color="k", lw=1)
-            ax_psd_hf.plot(f_hf, p_wide_mean[hf_mask], color="k", lw=1)
-            p_lfp_mean = np.mean(power_channels_lf, axis=0)
-            ax_psd_lf.plot(f_lf, p_lfp_mean[lf_mask], color="k", lw=1)
-
-            extent_wide = [f_wide.min(), f_wide.max(), np.min(depths), np.max(depths)]
+            extent = [f.min(), f.max(), np.min(depths), np.max(depths)]
             ax_psd_channels.imshow(
-                power_channels_wide, extent=extent_wide, aspect="auto", cmap="inferno", origin="lower", norm="log"
-            )
-            extent_hf = [f_hf.min(), f_hf.max(), np.min(depths), np.max(depths)]
-            ax_psd_hf_channels.imshow(
-                power_channels_wide[:, hf_mask],
-                extent=extent_hf,
-                aspect="auto",
-                cmap="inferno",
-                origin="lower",
-                norm="log",
-            )
-            extent_lf = [f_lf.min(), f_lf.max(), np.min(depths), np.max(depths)]
-            ax_psd_lf_channels.imshow(
-                power_channels_lf[:, lf_mask],
-                extent=extent_lf,
-                aspect="auto",
-                cmap="inferno",
-                origin="lower",
-                norm="log",
+                power_channels, extent=extent, aspect="auto", cmap="inferno", origin="lower", norm="log"
             )
             ax_psd.set_title(f"seg{segment_index} @ {t_start}s")
-            ax_psd_hf.set_title(f"seg{segment_index} @ {t_start}s")
-            ax_psd_lf.set_title(f"seg{segment_index} @ {t_start}s")
             if snippet_index == 0:
                 ax_psd.set_ylabel("Power ($\mu V^2/Hz$)")
-                ax_psd_hf.set_ylabel("Power ($\mu V^2/Hz$)")
-                ax_psd_lf.set_ylabel("Power ($\mu V^2/Hz$)")
-
                 ax_psd_channels.set_ylabel("Depth ($\mu$ m)")
-                ax_psd_hf_channels.set_ylabel("Depth ($\mu$ m)")
-                ax_psd_lf_channels.set_ylabel("Depth ($\mu$ m)")
             if segment_index == num_segments - 1:
                 ax_psd_channels.set_xlabel("Frequency (Hz)")
-                ax_psd_hf_channels.set_xlabel("Frequency (Hz)")
-                ax_psd_lf_channels.set_xlabel("Frequency (Hz)")
 
             ax_psd.set_yscale("log")
-            ax_psd_hf.set_yscale("log")
-            ax_psd_lf.set_yscale("log")
 
             if surface_channel_y_position is not None:
                 ax_psd_channels.axhline(y=surface_channel_y_position, c='g')
-                ax_psd_hf_channels.axhline(y=surface_channel_y_position, c='g')
-                ax_psd_lf_channels.axhline(y=surface_channel_y_position, c='g')
 
     fig_psd.subplots_adjust(wspace=0.3, hspace=0.3, top=0.8)
-    fig_psd_hf.subplots_adjust(wspace=0.3, hspace=0.3, top=0.8)
-    fig_psd_lf.subplots_adjust(wspace=0.3, hspace=0.3, top=0.8)
-    fig_psd.suptitle("Wideband")
-    fig_psd_hf.suptitle("High-frequency")
-    fig_psd_lf.suptitle("Low-frequency")
+    fig_psd.suptitle("PSD - Wideband")
 
-    return fig_psd, fig_psd_hf, fig_psd_lf
+    return fig_psd
 
 
 def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None, channel_labels: np.ndarray | None = None):
@@ -422,6 +358,7 @@ def generate_raw_qc(
     recording_preprocessed: si.BaseRecording | None = None,
     processing: Processing | None = None,
     visualization_output: dict | None = None,
+    allow_failed_metrics: bool = False
 ) -> dict[str : list[QCMetric]]:
     """
     Generate raw data quality control metrics for a given recording.
@@ -459,6 +396,7 @@ def generate_raw_qc(
     now = datetime.now()
     status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
     status_pass = QCStatus(evaluator="", status=Status.PASS, timestamp=now)
+    recording_name_abbrv = recording_abbrv_name(recording_name)
 
     channel_labels = None
     if processing is not None:
@@ -483,103 +421,79 @@ def generate_raw_qc(
     if relative_to is not None:
         raw_traces_path = raw_traces_path.relative_to(relative_to)
 
-    raw_data_value_with_flags = {
+    value_with_options = {
         "value": "",
         "options": ["Normal", "No spikes", "Noisy"],
         "status": ["Pass", "Fail", "Fail"],
         "type": "dropdown",
     }
-
+    value = DropdownMetric(**value_with_options)
     if visualization_output is not None:
         if recording_name in visualization_output:
             timeseries_link = visualization_output[recording_name].get("timeseries")
-            timeseries_str = f"[Sortingview link]({timeseries_link})"
+            timeseries_str = f"[Sortingview]({timeseries_link})"
         else:
-            timeseries_str = f"No timeseries link found for {recording_name}."
+            timeseries_str = None
     else:
-        timeseries_str = "No visualization output found in results."
+        timeseries_str = None
+
+    raw_metric_description = (
+        "This metric displays raw data snippets for both for AP and LFP streams. "
+        "Check out the snippets for abnormal noise or lack of spikes."
+    )
+    if timeseries_str is not None:
+        raw_metric_description += f"Raw data can also be visualized in {timeseries_str}"
 
     raw_data_metric = QCMetric(
-        name=f"Raw data {recording_name}",
+        name=f"Raw data {recording_name_abbrv}",
         modality=Modality.ECEPHYS,
         stage=Stage.RAW,
-        description=f"Evaluation of {recording_name} raw data. {timeseries_str}",
-        value=raw_data_value_with_flags,
+        description=raw_metric_description,
+        value=value,
         reference=str(raw_traces_path),
         status_history=[status_pending],
-        tags=[recording_name, "Raw Data"]
+        tags={
+            "probe": recording_name_abbrv
+        }
     )
     metrics.append(raw_data_metric)
     metric_names.append("Raw Data")
 
     logging.info("Generating PSD metrics")
-    fig_psd_wide, fig_psd_hf, fig_psd_lf = plot_psd(recording, recording_lfp=recording_lfp, channel_labels=channel_labels)
-    psd_wide_path = recording_fig_folder / "psd_wide.png"
-    psd_hf_path = recording_fig_folder / "psd_hf.png"
-    psd_lf_path = recording_fig_folder / "psd_lf.png"
+    fig_psd = plot_psd(recording, channel_labels=channel_labels)
+    psd_path = recording_fig_folder / "psd.png"
 
-    fig_psd_wide.savefig(psd_wide_path, dpi=300)
-    fig_psd_hf.savefig(psd_hf_path, dpi=300)
-    fig_psd_lf.savefig(psd_lf_path, dpi=300)
+    fig_psd.savefig(psd_path, dpi=300)
 
     if relative_to is not None:
-        psd_wide_path = psd_wide_path.relative_to(relative_to)
-        psd_hf_path = psd_hf_path.relative_to(relative_to)
-        psd_lf_path = psd_lf_path.relative_to(relative_to)
+        psd_path = psd_path.relative_to(relative_to)
 
-    psd_wide_metric = QCMetric(
-        name=f"PSD (Wide Band) {recording_name}",
+    value_with_options = {
+        "value": "",
+        "options": ["No contamination", "High frequency contamination", "Line contamination"],
+        "status": ["Pass", "Fail", "Fail"],
+        "type": "dropdown",
+    }
+    value = DropdownMetric(**value_with_options)
+    psd_metric_description = (
+        "This metric displays the power spectral density (PSD) of raw data. "
+        "PDSs are computed by channel and shown as lines or map (by channel depth). "
+        "Use the plots to spot contamination from high-frequency or line noise sources."
+    )
+    psd_metric = QCMetric(
+        name=f"PSD {recording_name_abbrv}",
         modality=Modality.ECEPHYS,
         stage=Stage.RAW,
-        description=f"Evaluation of {recording_name} wide-band power spectrum density",
-        reference=str(psd_wide_path),
+        description=psd_metric_description,
+        reference=str(psd_path),
         value=None,
         status_history=[status_pass],
-        tags=[recording_name, "PSD (Wide Band)"]
+        tags={
+            "probe": recording_name_abbrv
+        }
     )
-    metrics.append(psd_wide_metric)
-    metric_names.append("PSD (Wide Band)")
-
-    hf_value_with_flags = {
-        "value": "",
-        "options": ["No contamination", "High frequency contamination"],
-        "status": ["Pass", "Fail"],
-        "type": "dropdown",
-    }
-
-    psd_hf_metric = QCMetric(
-        name=f"PSD (High Frequency) {recording_name}",
-        modality=Modality.ECEPHYS,
-        stage=Stage.RAW,
-        description=f"Evaluation of {recording_name} high-frequency power spectrum density",
-        reference=str(psd_hf_path),
-        value=hf_value_with_flags,
-        status_history=[status_pending],
-        tags=[recording_name, "PSD (High Frequency)"]
-    )
-    metrics.append(psd_hf_metric)
-    metric_names.append("PSD (High Frequency)")
-
-    lf_value_with_flags = {
-        "value": "",
-        "options": ["No contamination", "Line (60 Hz) contamination"],
-        "status": ["Pass", "Fail"],
-        "type": "dropdown",
-    }
-
-    psd_lf_metric = QCMetric(
-        name=f"PSD (Low Frequency) {recording_name}",
-        modality=Modality.ECEPHYS,
-        stage=Stage.RAW,
-        description=f"Evaluation of {recording_name} low-frequency power spectrum density",
-        reference=str(psd_lf_path),
-        value=lf_value_with_flags,
-        status_history=[status_pending],
-        tags=[recording_name, "PSD (Low Frequency)"]
-    )
-    metrics.append(psd_lf_metric)
-    metric_names.append("PSD (Low Frequency)")
-    
+    metrics.append(psd_metric)
+    metric_names.append("PSD")
 
     logging.info("Generating NOISE metrics")
     fig_rms, ax_rms = plot_rms_by_depth(recording, recording_preprocessed, channel_labels=channel_labels)
@@ -620,15 +534,24 @@ def generate_raw_qc(
         "status": ["Pass", "Fail"],
         "type": "dropdown",
     }
+    value = DropdownMetric(**value_with_options)
+    rms_mtric_description = (
+        "This metric shows the noise levels (RMS) by depth for each channel, computed from the raw and "
+        "preprocessed data. It also includes a summary of channel labels (after bad channel detection). "
+        "Use this metric to check if out-of-brain channels are visible (lower RMS values "
+        "at the top of the probe), but not labeled as 'out'."
+    )
     rms_metric = QCMetric(
-        name=f"RMS {recording_name}",
+        name=f"RMS {recording_name_abbrv}",
         modality=Modality.ECEPHYS,
         stage=Stage.RAW,
-        description=f"Evaluation of {recording_name} RMS",
+        description=rms_mtric_description,
         reference=str(rms_path),
-        value=value_with_options,
+        value=value,
         status_history=[status_pass],
-        tags=[recording_name, "RMS"]
+        tags={
+            "probe": recording_name_abbrv
+        }
     )
     metrics.append(rms_metric)
     metric_names.append("RMS")
@@ -671,6 +594,7 @@ def generate_drift_qc(
 
     recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(parents=True, exist_ok=True)
+    recording_name_abbrv = recording_abbrv_name(recording_name)
 
     # open displacement arrays
     if not motion_path.is_dir():
@@ -751,15 +675,22 @@ def generate_drift_qc(
         "status": ["Pass", "Fail", "Fail"],
         "type": "dropdown",
     }
+    value = DropdownMetric(**value_with_options)
+    drift_metric_description = (
+        "This metric shows a rastermap of the recording with overlaid estimated motion. "
+        "Use this metric to spot high drifts or bad drift estimation."
+    )
     drift_metric = QCMetric(
-        name=f"Probe Drift - {recording_name}",
+        name=f"Probe Drift - {recording_name_abbrv}",
         modality=Modality.ECEPHYS,
         stage=Stage.RAW,
-        description=f"Evaluation of {recording_name} probe drift",
+        description=drift_metric_description,
         reference=str(drift_map_path),
-        value=value_with_options,
+        value=value,
         status_history=[QCStatus(evaluator="", status=Status.PENDING, timestamp=datetime.now())],
-        tags=[recording_name, "Probe Drift"]
+        tags={
+            "probe": recording_name_abbrv
+        }
         
     )
     drift_metrics = [drift_metric]
@@ -774,8 +705,6 @@ def generate_event_qc(
     relative_to: Path | None = None,
     event_dict: dict | None = None,
     event_keys: list[str] = ["licktime", "optogeneticstime"],
-    t_cutout_saturation_s: float = 0.002,
-    num_saturation_events_to_plot: int = 3,
     **job_kwargs,
 ):
     """
@@ -794,6 +723,7 @@ def generate_event_qc(
     now = datetime.now()
     status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
     status_pass = QCStatus(evaluator="", status=Status.PASS, timestamp=now)
+    recording_name_abbrv = recording_abbrv_name(recording_name)
 
     logging.info("Generating SATURATION metric")
 
@@ -814,111 +744,14 @@ def generate_event_qc(
         clim = saturation_threshold_uv / 2
         recording_ps = spre.phase_shift(recording)
 
-        # make figure for saturation events
-        saturation_status = status_pending
-        if len(pos_evts) > 0 and len(neg_evts) > 0:
-            nrows = min(num_saturation_events_to_plot, max(len(pos_evts), len(neg_evts)))
-            fig_sat_samples, axs_sat = _get_fig_axs(ncols=2, nrows=nrows)
-            pos_ax_col = 0
-            neg_ax_col = 1
-        elif len(pos_evts) > 0:
-            nrows = min(num_saturation_events_to_plot, len(pos_evts))
-            fig_sat_samples, axs_sat = _get_fig_axs(ncols=1, nrows=nrows)
-            pos_ax_col = 0
-        elif len(neg_evts) > 0:
-            nrows = min(num_saturation_events_to_plot, len(neg_evts))
-            fig_sat_samples, axs_sat = _get_fig_axs(ncols=1, nrows=nrows)
-            neg_ax_col = 0
-        else:
-            nrows = 1
-            fig_sat_samples, axs_sat = _get_fig_axs(ncols=1, nrows=1)
-            axs_sat[0, 0].axis("off")
-            saturation_status = status_pass
-
         if len(pos_evts) > 0:
             logging.info(f"\tFound {len(pos_evts)} positive saturation events!")
-            if len(pos_evts) > num_saturation_events_to_plot:
-                random_saturation_events = pos_evts[
-                    np.random.choice(np.arange(len(pos_evts)), size=num_saturation_events_to_plot, replace=False)
-                ]
-                random_saturation_events = random_saturation_events[np.argsort(random_saturation_events["sample_index"])]
-            else:
-                random_saturation_events = pos_evts
-            for i_r, r in enumerate(random_saturation_events):
-                ax = axs_sat[i_r, pos_ax_col]
-                t0 = recording.sample_index_to_time(r["sample_index"])
-                w = sw.plot_traces(
-                    recording_ps,
-                    time_range=[t0 - t_cutout_saturation_s, t0 + t_cutout_saturation_s],
-                    clim=(-clim, clim),
-                    ax=ax,
-                )
-                ax.set_xticks([t0 - t_cutout_saturation_s, t0, t0 + t_cutout_saturation_s])
-                ax.set_xticklabels([- t_cutout_saturation_s * 1000, 0, t_cutout_saturation_s  * 1000])
-                if i_r == 0:
-                    ax.set_title(f"Positive\n@{np.round(t0, 2)}")
-                else:
-                    ax.set_title(f"@{np.round(t0, 2)}")
-                ax.set_ylabel("Depth ($\\mu m$)")
-            ax.set_xlabel("Time (ms)")
-            for missing_ax in np.arange(i_r + 1, nrows):
-                axs_sat[missing_ax, pos_ax_col].axis("off")
         else:
             logging.info("\tNo positive saturation events found")
         if len(neg_evts) > 0:
             logging.info(f"\tFound {len(neg_evts)} negative saturation events!")
-            if len(neg_evts) > num_saturation_events_to_plot:
-                random_saturation_events = neg_evts[
-                    np.random.choice(np.arange(len(neg_evts)), size=num_saturation_events_to_plot, replace=False)
-                ]
-                random_saturation_events = random_saturation_events[np.argsort(random_saturation_events["sample_index"])]
-            else:
-                random_saturation_events = neg_evts
-            for i_r, r in enumerate(random_saturation_events):
-                ax = axs_sat[i_r, neg_ax_col]
-                t0 = recording.sample_index_to_time(r["sample_index"])
-                w = sw.plot_traces(
-                    recording_ps,
-                    time_range=[t0 - t_cutout_saturation_s, t0 + t_cutout_saturation_s],
-                    clim=(-clim, clim),
-                    ax=ax,
-                )
-                ax.set_xticks([t0 - t_cutout_saturation_s, t0, t0 + t_cutout_saturation_s])
-                ax.set_xticklabels([- t_cutout_saturation_s * 1000, 0, t_cutout_saturation_s * 1000])
-                if i_r == 0:
-                    ax.set_title(f"Negative\n@{np.round(t0, 2)}")
-                else:
-                    ax.set_title(f"{np.round(t0, 2)}")
-                ax.set_ylabel("Depth ($\\mu m$)")
-
-            ax.set_xlabel("Time (ms)")
-            for missing_ax in np.arange(i_r + 1, nrows):
-                axs_sat[missing_ax, neg_ax_col].axis("off")
         else:
             logging.info("\tNo negative saturation events found")
-        fig_sat_samples.suptitle(
-            f"Saturation events:\nPositive: {len(pos_evts)} -- Negative: {len(neg_evts)}"
-        )
-        if axs_sat.shape[1] == 1:
-            fig_sat_samples.subplots_adjust(left=0.3, right=0.85, wspace=0.5, hspace=0.3)
-        else:
-            fig_sat_samples.subplots_adjust(left=0.3, wspace=0.5, hspace=0.3)
-
-        fig_sat_samples_path = recording_fig_folder / "saturation_samples.png"
-        fig_sat_samples.savefig(fig_sat_samples_path, dpi=300)
-        if relative_to is not None:
-            fig_sat_samples_path = fig_sat_samples_path.relative_to(relative_to)
-
-        saturation_samples_metric = QCMetric(
-            name=f"Saturation events samples {recording_name}",
-            modality=Modality.ECEPHYS,
-            stage=Stage.RAW,
-            description=f"Evaluation of {recording_name} saturation samples",
-            reference=str(fig_sat_samples_path),
-            value={"value": "Pass"},
-            status_history=[status_pass],
-            tags=[recording_name, "Saturation samples"]
-        )
 
         # saturation events timeline
         fig_sat_time, ax_sat_time = plt.subplots(figsize=(15, 10))
@@ -954,26 +787,31 @@ def generate_event_qc(
                 "status": ["Pass", "Fail"],
                 "type": "dropdown",
             }
+            value = DropdownMetric(**value_with_options)
             saturation_status = status_pending
         else:
-            value_with_options = {"value": "Pass"}
+            value = {"value": "Pass"}
             saturation_status = status_pass
 
+        saturation_timeline_metric_description = (
+            "This metric shows a scatter plot of saturation events, with red and blue markers for positive and negative "
+            "events, respectively. Use this metric to spot an abnormal number of saturation events."
+        )
         saturation_timeline_metric = QCMetric(
-            name=f"Saturation events timeline {recording_name}",
+            name=f"Saturation events timeline {recording_name_abbrv}",
             modality=Modality.ECEPHYS,
             stage=Stage.RAW,
-            description=f"Evaluation of {recording_name} saturation timeline",
+            description=saturation_timeline_metric_description,
             reference=str(fig_sat_time_path),
-            value=value_with_options,
+            value=value,
             status_history=[saturation_status],
-            tags=[recording_name, "Saturation timeline"]
+            tags={
+            "probe": recording_name_abbrv
+        }
         )
 
         metrics.append(saturation_timeline_metric)
         metric_names.append("Saturation timeline")
-        metrics.append(saturation_samples_metric)
-        metric_names.append("Saturation samples")
 
     if event_dict is not None:
         logging.info("Generating TRIGGER EVENT metrics")
@@ -998,7 +836,8 @@ def generate_event_qc(
             analyzer = si.create_sorting_analyzer(sorting_events, recording, sparse=False)
 
             extensions = {
-                "random_spikes": {"method": "all"},
+                "random_spikes": {"method": "uniform"},
+                "waveforms": {"ms_before": 10, "ms_after": 10},
                 "templates": {"ms_before": 10, "ms_after": 10},
             }
             analyzer.compute(extensions, **job_kwargs)
@@ -1041,39 +880,39 @@ def generate_event_qc(
                 "status": ["Pass", "Fail"],
                 "type": "dropdown",
             }
+            value = DropdownMetric(**value_with_options)
             events_status = status_pending
         else:
             logging.info(f"\tNo events found for {recording_name}")
 
-            value_with_options = {
-                "value": "Pass",
-            }
-            events_status = status_pass
+            fig_events = None
 
-            fig_events, ax_events = _get_fig_axs(1, 1)
-            ax_events[0, 0].axis("off")
-            fig_events.suptitle(
-                f"No trigger events found."
+        # TODO: maybe add raw / preprocessed?
+        if fig_events is not None:
+            fig_events_path = recording_fig_folder / "trigger_events.png"
+            fig_events.savefig(fig_events_path, dpi=300)
+            if relative_to is not None:
+                fig_events_path = fig_events_path.relative_to(relative_to)
+
+            trigger_event_metric_description  = (
+                "This metric shows the average signals correpsinding to trigger events that could cause "
+                "artifacts in the traces (e.g., opto stimulation, lick events). Use this metric to report "
+                "abnormal artifacts that might affect spike sorting."
             )
-            events_status = status_pass
-
-        fig_events_path = recording_fig_folder / "trigger_events.png"
-        fig_events.savefig(fig_events_path, dpi=300)
-        if relative_to is not None:
-            fig_events_path = fig_events_path.relative_to(relative_to)
-
-        trigger_event_metric = QCMetric(
-            name=f"Trigger events {recording_name}",
-            modality=Modality.ECEPHYS,
-            stage=Stage.RAW,
-            description=f"Evaluation of {recording_name} trigger events",
-            reference=str(fig_events_path),
-            value=value_with_options,
-            status_history=[events_status],
-            tags=[recording_name, "Trigger events"]
-        )
-        metrics.append(trigger_event_metric)
-        metric_names.append("Trigger events")
+            trigger_event_metric = QCMetric(
+                name=f"Trigger events {recording_name_abbrv}",
+                modality=Modality.ECEPHYS,
+                stage=Stage.RAW,
+                description=trigger_event_metric_description,
+                reference=str(fig_events_path),
+                value=value,
+                status_history=[events_status],
+                tags={
+            "probe": recording_name_abbrv
+        }
+            )
+            metrics.append(trigger_event_metric)
+            metric_names.append("Trigger events")
 
     return metrics, metric_names
 
@@ -1126,6 +965,7 @@ def generate_units_qc(
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
     now = datetime.now()
     status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
+    recording_name_abbrv = recording_abbrv_name(recording_name)
 
     logging.info("Generating UNIT YIELD metric")
     if sorting_analyzer is None:
@@ -1271,11 +1111,11 @@ def generate_units_qc(
     if visualization_output is not None:
         if recording_name in visualization_output:
             sorting_summary_link = visualization_output[recording_name].get("sorting_summary")
-            sorting_summary_str = f"[Sortingview link]({sorting_summary_link})"
+            sorting_summary_str = f"[Sortingview]({sorting_summary_link})"
         else:
-            sorting_summary_str = f"No sorting summary link found for {recording_name}."
+            sorting_summary_str = None
     else:
-        sorting_summary_str = "No visualization output found in results."
+        sorting_summary_str = None
 
     value_with_options = {
         "value": "",
@@ -1283,61 +1123,29 @@ def generate_units_qc(
         "status": ["Pass", "Fail", "Fail"],
         "type": "dropdown",
     }
+    value = DropdownMetric(**value_with_options)
+    yield_metric_description = (
+        "This metric displays a summary of spike sorted units, including distributions of key features "
+        "and number of units with different labels. Use this metric to report a low yield of units or "
+        "a disproportionate high number of bad units with respect to good units. "
+    )
+    if sorting_summary_str is not None:
+        yield_metric_description += f"The sorting summary can also be viewed in {sorting_summary_str}"
+
     yield_metric = QCMetric(
-        name=f"Unit Metrics Yield - {recording_name}",
+        name=f"Unit Metrics Yield - {recording_name_abbrv}",
         modality=Modality.ECEPHYS,
         stage=Stage.PROCESSING,
-        description=f"Evaluation of {recording_name} unit metrics yield. {sorting_summary_str}",
+        description=yield_metric_description,
         reference=str(unit_yield_path),
-        value=value_with_options,
+        value=value,
         status_history=[status_pending],
-        tags=[recording_name, "Unit Yield"]
+        tags={
+            "probe": recording_name_abbrv
+        }
     )
     metrics.append(yield_metric)
     metric_names.append("Unit Yield")
-
-    logging.info("Generating SORTING CURATION metric")
-    curation_link = "https://ephys.allenneuraldynamics.org/ephys_gui_app?analyzer_path={derived_asset_location}/postprocessed/"
-    curation_link += f"{recording_name}.zarr&recording_path="
-    if raw_recording is not None:
-        curation_link += "{raw_asset_location}/"
-        # figure out whether ecephys_compressed or ecephys/ecephys_compressed #TODO
-        recording_relative_path = get_recording_relative_path(raw_recording)
-        curation_link += recording_relative_path
-
-    curation_link_url = quote(curation_link)
-
-    sorting_curation_metric = QCMetric(
-        name=f"Sorting Curation - {recording_name}",
-        modality=Modality.ECEPHYS,
-        stage=Stage.PROCESSING,
-        description=f"Sorting Curation for {recording_name}",
-        reference=curation_link_url,
-        value={},
-        status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
-        tags=[recording_name, "Sorting Curation"]
-    )
-    metrics.append(sorting_curation_metric)
-    metric_names.append("Sorting Curation")
-
-    logging.info("Generating ISI VISUAL AREA LABEL metric")
-    value_with_options = {
-        "value": "",
-        "options": ISI_VISUAL_AREAS,
-        "status": ["Pass" for area in ISI_VISUAL_AREAS],
-        "type": "dropdown",
-    }
-    isi_visual_area_metric = QCMetric(
-        name=f"Manual annotation of ISI Visual Area Label - {recording_name}",
-        modality=Modality.ECEPHYS,
-        stage=Stage.PROCESSING,
-        description=f"Manual annotation of visual area label based on ISI imaging for {recording_name}",
-        value=value_with_options,
-        status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
-        tags=[recording_name, "ISI Visual Area Label"]
-    )
-    metrics.append(isi_visual_area_metric)
-    metric_names.append("ISI Visual Area Label")
 
     logging.info("Generating FIRING RATE metric")
     num_segments = sorting_analyzer.get_num_segments()
@@ -1379,20 +1187,60 @@ def generate_units_qc(
         "value": "",
         "options": ["No problems detected", "Seizure", "Firing Rate Gap"],
         "status": ["Pass", "Fail", "Fail"],
-        "type": "checkbox",
+        "type": "dropdown",
     }
+    value = DropdownMetric(**value_with_options)
+    firing_rate_metric_description = (
+        "This metric shows the population firing rate across the entire recording. Use this metric "
+        "to spot abnormal seizure-like activity or firing rate gaps, which could result from hardware "
+        "failures diring acquisition."
+    )
     firing_rate_metric = QCMetric(
-        name=f"Firing rate - {recording_name}",
+        name=f"Firing rate - {recording_name_abbrv}",
         modality=Modality.ECEPHYS,
         stage=Stage.PROCESSING,
-        description=f"Evaluation of {recording_name} firing rate",
+        description=firing_rate_metric_description,
         reference=str(firing_rate_path),
-        value=value_with_options,
+        value=value,
         status_history=[status_pending],
-        tags=[recording_name, "Firing Rate"]
+        tags={
+            "probe": recording_name_abbrv
+        }
     )
     metrics.append(firing_rate_metric)
     metric_names.append("Firing Rate")
+
+    logging.info("Generating SORTING CURATION metric")
+    curation_link = "https://ephys.allenneuraldynamics.org/ephys_gui_app?analyzer_path={derived_asset_location}/postprocessed/"
+    curation_link += f"{recording_name}.zarr&recording_path="
+    if raw_recording is not None:
+        curation_link += "{raw_asset_location}/"
+        # figure out whether ecephys_compressed or ecephys/ecephys_compressed #TODO
+        recording_relative_path = get_recording_relative_path(raw_recording)
+        curation_link += recording_relative_path
+
+    curation_link_url = quote(curation_link)
+
+    sorting_curation_metric_description = (
+        "This metric renders the SpikeInterface GUI through the AIND ephys portal. "
+        "You can use the GUI to curate spike sorting results (label, remove, merge, split). "
+        "Use the 'Submit to parent' button to submit the curation data to the QC Portal."
+    )
+    sorting_curation_metric = CurationMetric(
+        name=f"Sorting Curation - {recording_name_abbrv}",
+        type="Spike sorting curation",
+        modality=Modality.ECEPHYS,
+        stage=Stage.PROCESSING,
+        description=sorting_curation_metric_description,
+        reference=curation_link_url,
+        value=[],
+        status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
+        tags={
+            "probe": recording_name_abbrv
+        }
+    )
+    metrics.append(sorting_curation_metric)
+    metric_names.append("Sorting Curation")
 
     return metrics, metric_names
 
