@@ -13,6 +13,7 @@ import matplotlib as mpl
 from scipy.signal import welch, savgol_filter
 
 import spikeinterface as si
+from spikeinterface.core.core_tools import check_json
 import spikeinterface.preprocessing as spre
 from spikeinterface.curation import validate_curation_dict
 import spikeinterface.widgets as sw
@@ -57,7 +58,7 @@ def _get_surface_channel(recording: si.BaseRecording, channel_labels: np.ndarray
         channel_ids_out = recording.channel_ids[channel_labels == 'out']
 
         if len(channel_ids_out) == 0:
-           logging.info(f"No out channels detected")
+           logging.info("No out channels detected")
         else:
             surface_channel_id = channel_ids_out[0]
             surface_channel_index = recording.channel_ids.tolist().index(surface_channel_id)
@@ -98,9 +99,9 @@ def load_preprocessed_recording(preprocessed_json_file, session_name, ecephys_fo
             except:
                 pass
         if recording_preprocessed is None:
-            logging.info(f"Error loading preprocessed data...")
+            logging.info("Error loading preprocessed data...")
     else:
-        logging.info(f"Preprocessed recording not found...")
+        logging.info("Preprocessed recording not found...")
     return recording_preprocessed
 
 
@@ -170,8 +171,9 @@ def get_default_curation_value(sorting_analyzer: si.SortingAnalyzer) -> dict:
             curation_dict["manual_labels"].append({"unit_id": unit_id, "quality": ["noise"]})
     try:
         validate_curation_dict(curation_dict)
+        # make it serializable
+        curation_dict = json.loads(json.dumps(check_json(curation_dict)))
     except ValueError as e:
-        logging.info(f"Curated dictionary is invalid: {e}")
         curation_dict = None
     return curation_dict
 
@@ -1270,7 +1272,7 @@ def generate_units_qc(
     )
     # Create default curation value from curation
     curation_dict = get_default_curation_value(sorting_analyzer)
-    if curation_dict is None:
+    if curation_dict is not None:
         curation_value = [curation_dict]
         curation_history = [
             CurationHistory(
@@ -1279,6 +1281,7 @@ def generate_units_qc(
             )
         ]
     else:
+        logging.info("\tCurated dictionary is invalid.")
         curation_value = []
         curation_history = []
 
