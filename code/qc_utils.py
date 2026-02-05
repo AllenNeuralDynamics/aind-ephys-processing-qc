@@ -741,9 +741,6 @@ def generate_event_qc(
     else:
         pos_evts, neg_evts = find_saturation_events(recording, saturation_threshold_uv, **job_kwargs)
 
-        clim = saturation_threshold_uv / 2
-        recording_ps = spre.phase_shift(recording)
-
         if len(pos_evts) > 0:
             logging.info(f"\tFound {len(pos_evts)} positive saturation events!")
         else:
