@@ -14,26 +14,29 @@ from scipy.signal import welch, savgol_filter
 
 import spikeinterface as si
 import spikeinterface.preprocessing as spre
+from spikeinterface.curation import validate_curation_dict
 import spikeinterface.widgets as sw
 
 from aind_data_schema_models.modalities import Modality
 
 from aind_data_schema.core.processing import Processing
-from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status, Stage, CurationMetric
+from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status, Stage, CurationMetric, CurationHistory
 from aind_qcportal_schema.metric_value import DropdownMetric
 
-# TODO: add proper descriptions
 
-
-def recording_abbrv_name(recording_name):
-    """
-    Abbreviates recording name from Open Ephys stream by removing Record Node and Plugin source from the name.
-    """
-    import re
-    if "Record Node" in recording_name:
-        return re.sub(r'Record Node [^#]+#Neuropix-PXI-\d+\.', '', recording_name)
-    else:
-        return recording_name
+default_curation_dict = {
+    "format_version": "2",
+    "label_definitions": {
+        "quality":{
+            "label_options": ["good", "MUA", "noise"],
+            "exclusive": True,
+        }, 
+    },
+    "manual_labels": [],
+    "removed": [],
+    "merges": [],
+    "splits": [],
+}
 
 
 def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
@@ -46,6 +49,31 @@ def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
     elif ncols == 1:
         axs = axs[:, None]
     return fig, axs
+
+def _get_surface_channel(recording: si.BaseRecording, channel_labels: np.ndarray) -> int | None:
+    y_locs = recording.get_channel_locations()[:, 1]
+    surface_channel_y_position = None
+    if channel_labels is not None:
+        channel_ids_out = recording.channel_ids[channel_labels == 'out']
+
+        if len(channel_ids_out) == 0:
+           logging.info(f"No out channels detected")
+        else:
+            surface_channel_id = channel_ids_out[0]
+            surface_channel_index = recording.channel_ids.tolist().index(surface_channel_id)
+            surface_channel_y_position = y_locs[surface_channel_index]
+    
+    return surface_channel_y_position
+
+def recording_abbrv_name(recording_name):
+    """
+    Abbreviates recording name from Open Ephys stream by removing Record Node and Plugin source from the name.
+    """
+    import re
+    if "Record Node" in recording_name:
+        return re.sub(r'Record Node [^#]+#Neuropix-PXI-\d+\.', '', recording_name)
+    else:
+        return recording_name
 
 
 def load_preprocessed_recording(preprocessed_json_file, session_name, ecephys_folder, data_folder):
@@ -117,21 +145,38 @@ def get_recording_relative_path(recording):
     return relative_path
 
 
-def _get_surface_channel(recording: si.BaseRecording, channel_labels: np.ndarray) -> int | None:
-    y_locs = recording.get_channel_locations()[:, 1]
-    surface_channel_y_position = None
-    if channel_labels is not None:
-        channel_ids_out = recording.channel_ids[channel_labels == 'out']
+def get_default_curation_value(sorting_analyzer: si.SortingAnalyzer) -> dict:
+    """
+    Generate default curation value dict from sorting analyzer.
 
-        if len(channel_ids_out) == 0:
-           logging.info(f"No out channels detected")
-        else:
-            surface_channel_id = channel_ids_out[0]
-            surface_channel_index = recording.channel_ids.tolist().index(surface_channel_id)
-            surface_channel_y_position = y_locs[surface_channel_index]
-    
-    return surface_channel_y_position
+    Parameters
+    ----------
+    sorting_analyzer : si.SortingAnalyzer
+        The sorting analyzer object.
 
+    Returns
+    -------
+    curation_value : dict
+        The default curation value dict.
+    """
+    # prepare the curation data using decoder labels
+    curation_dict = default_curation_dict.copy()
+    curation_dict["unit_ids"] = sorting_analyzer.unit_ids
+    if "decoder_label" in sorting_analyzer.sorting.get_property_keys():
+        decoder_labels = sorting_analyzer.get_sorting_property("decoder_label")
+        noise_units = sorting_analyzer.unit_ids[decoder_labels == "noise"]
+        curation_dict["removed"] = list(noise_units)
+        for unit_id in noise_units:
+            curation_dict["manual_labels"].append({"unit_id": unit_id, "quality": ["noise"]})
+    try:
+        validate_curation_dict(curation_dict)
+    except ValueError as e:
+        logging.info(f"Curated dictionary is invalid: {e}")
+        curation_dict = None
+    return curation_dict
+
+
+### METRICS GENERATION FUNCTIONS ###
 def plot_raw_data(
     recording: si.BaseRecording,
     recording_lfp: si.BaseRecording | None = None,
@@ -741,9 +786,6 @@ def generate_event_qc(
     else:
         pos_evts, neg_evts = find_saturation_events(recording, saturation_threshold_uv, **job_kwargs)
 
-        clim = saturation_threshold_uv / 2
-        recording_ps = spre.phase_shift(recording)
-
         if len(pos_evts) > 0:
             logging.info(f"\tFound {len(pos_evts)} positive saturation events!")
         else:
@@ -1226,14 +1268,29 @@ def generate_units_qc(
         "You can use the GUI to curate spike sorting results (label, remove, merge, split). "
         "Use the 'Submit to parent' button to submit the curation data to the QC Portal."
     )
+    # Create default curation value from curation
+    curation_dict = get_default_curation_value(sorting_analyzer)
+    if curation_dict is None:
+        curation_value = [curation_dict]
+        curation_history = [
+            CurationHistory(
+                curator="Ephys pipeline",
+                timestamp=now,
+            )
+        ]
+    else:
+        curation_value = []
+        curation_history = []
+
     sorting_curation_metric = CurationMetric(
         name=f"Sorting Curation - {recording_name_abbrv}",
         type="Spike sorting curation",
+        value=curation_value,
+        curation_history=curation_history,
         modality=Modality.ECEPHYS,
         stage=Stage.PROCESSING,
         description=sorting_curation_metric_description,
         reference=curation_link_url,
-        value=[],
         status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
         tags={
             "probe": recording_name_abbrv
