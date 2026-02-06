@@ -278,7 +278,7 @@ if __name__ == "__main__":
 
         quality_control_fig_folder = results_folder / f"quality_control_{recording_name}"
         
-        metrics_raw, raw_names = generate_raw_qc(
+        metrics_raw = generate_raw_qc(
             recording,
             recording_name,
             quality_control_fig_folder,
@@ -291,7 +291,7 @@ if __name__ == "__main__":
         all_metrics.extend(metrics_raw)
 
         if COMPUTE_EVENT_METRIC:
-            metrics_event, event_names = generate_event_qc(
+            metrics_event = generate_event_qc(
                 recording,
                 recording_name,
                 quality_control_fig_folder,
@@ -306,17 +306,21 @@ if __name__ == "__main__":
         if ecephys_sorted_folder is not None:
             motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
 
-            metrics_drift, drift_names = generate_drift_qc(
-                recording,
-                recording_name,
-                motion_path,
-                quality_control_fig_folder,
-                relative_to=results_folder,
-            )
-            all_metrics.extend(metrics_drift)
+            # open displacement arrays
+            if not motion_path.is_dir():
+                logging.info(f"\tMotion not found for {recording_name}")
+            else:
+                metrics_drift = generate_drift_qc(
+                    recording,
+                    recording_name,
+                    motion_path,
+                    quality_control_fig_folder,
+                    relative_to=results_folder,
+                )
+                all_metrics.extend(metrics_drift)
         
         if ecephys_sorted_folder is not None:
-            metrics_units, units_names = generate_units_qc(
+            metrics_units = generate_units_qc(
                 sorting_analyzer,
                 recording_name,
                 quality_control_fig_folder,

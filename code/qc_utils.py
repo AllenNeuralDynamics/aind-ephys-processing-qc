@@ -433,11 +433,8 @@ def generate_raw_qc(
     -------
     metrics : list[QCMetric]:
         The quality control metrics.
-    metric_names : list[str]
-        List of metric names added
     """
     metrics = []
-    metric_names = []
     recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
     now = datetime.now()
@@ -504,7 +501,6 @@ def generate_raw_qc(
         }
     )
     metrics.append(raw_data_metric)
-    metric_names.append("Raw Data")
 
     logging.info("Generating PSD metrics")
     fig_psd = plot_psd(recording, channel_labels=channel_labels)
@@ -540,7 +536,6 @@ def generate_raw_qc(
         }
     )
     metrics.append(psd_metric)
-    metric_names.append("PSD")
 
     logging.info("Generating NOISE metrics")
     fig_rms, ax_rms = plot_rms_by_depth(recording, recording_preprocessed, channel_labels=channel_labels)
@@ -601,9 +596,8 @@ def generate_raw_qc(
         }
     )
     metrics.append(rms_metric)
-    metric_names.append("RMS")
 
-    return metrics, metric_names
+    return metrics
 
 
 def generate_drift_qc(
@@ -633,8 +627,6 @@ def generate_drift_qc(
     -------
     metrics : list[QCMetric]:
         The quality control metrics.
-    metric_names : list[str]
-        List of metric names added
     """
 
     logging.info("Generating DRIFT metric")
@@ -642,11 +634,6 @@ def generate_drift_qc(
     recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(parents=True, exist_ok=True)
     recording_name_abbrv = recording_abbrv_name(recording_name)
-
-    # open displacement arrays
-    if not motion_path.is_dir():
-        logging.info(f"\tMotion not found for {recording_name}")
-        return {}
 
     motion_info = spre.load_motion_info(motion_path)
     all_peaks = motion_info["peaks"]
@@ -742,7 +729,7 @@ def generate_drift_qc(
     )
     drift_metrics = [drift_metric]
 
-    return drift_metrics, ["Probe Drift"]
+    return drift_metrics
 
 
 def generate_event_qc(
@@ -762,8 +749,6 @@ def generate_event_qc(
     -------
     metrics : list[QCMetric]:
         The quality control metrics.
-    metric_names : list[str]
-        List of metric names added
     """
     recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
@@ -782,7 +767,6 @@ def generate_event_qc(
         saturation_threshold_uv = saturation_thresholds_uv.get(part_number)
 
     metrics = []
-    metric_names = []
     if saturation_threshold_uv is None:
         logging.info(f"\tSaturation threshold for {recording_name}. Cannot generate saturation metrics.")
     else:
@@ -850,12 +834,11 @@ def generate_event_qc(
             value=value,
             status_history=[saturation_status],
             tags={
-            "probe": recording_name_abbrv
-        }
+                "probe": recording_name_abbrv
+            }
         )
 
         metrics.append(saturation_timeline_metric)
-        metric_names.append("Saturation timeline")
 
     if event_dict is not None:
         logging.info("Generating TRIGGER EVENT metrics")
@@ -956,9 +939,8 @@ def generate_event_qc(
         }
             )
             metrics.append(trigger_event_metric)
-            metric_names.append("Trigger events")
 
-    return metrics, metric_names
+    return metrics
 
 
 def generate_units_qc(
@@ -1000,11 +982,8 @@ def generate_units_qc(
     -------
     metrics : list[QCMetric]:
         The quality control metrics.
-    metric_names : list[str]
-        List of metric names added
     """    
     metrics = []
-    metric_names = []
     recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
     now = datetime.now()
@@ -1189,7 +1168,6 @@ def generate_units_qc(
         }
     )
     metrics.append(yield_metric)
-    metric_names.append("Unit Yield")
 
     logging.info("Generating FIRING RATE metric")
     num_segments = sorting_analyzer.get_num_segments()
@@ -1252,7 +1230,6 @@ def generate_units_qc(
         }
     )
     metrics.append(firing_rate_metric)
-    metric_names.append("Firing Rate")
 
     logging.info("Generating SORTING CURATION metric")
     curation_link = "https://ephys.allenneuraldynamics.org/ephys_gui_app?analyzer_path={derived_asset_location}/postprocessed/"
@@ -1300,9 +1277,8 @@ def generate_units_qc(
         }
     )
     metrics.append(sorting_curation_metric)
-    metric_names.append("Sorting Curation")
 
-    return metrics, metric_names
+    return metrics
 
 
 ### EVENTS UTILS
