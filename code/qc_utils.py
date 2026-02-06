@@ -13,27 +13,31 @@ import matplotlib as mpl
 from scipy.signal import welch, savgol_filter
 
 import spikeinterface as si
+from spikeinterface.core.core_tools import check_json
 import spikeinterface.preprocessing as spre
+from spikeinterface.curation import validate_curation_dict
 import spikeinterface.widgets as sw
 
 from aind_data_schema_models.modalities import Modality
 
 from aind_data_schema.core.processing import Processing
-from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status, Stage, CurationMetric
+from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status, Stage, CurationMetric, CurationHistory
 from aind_qcportal_schema.metric_value import DropdownMetric
 
-# TODO: add proper descriptions
 
-
-def recording_abbrv_name(recording_name):
-    """
-    Abbreviates recording name from Open Ephys stream by removing Record Node and Plugin source from the name.
-    """
-    import re
-    if "Record Node" in recording_name:
-        return re.sub(r'Record Node [^#]+#Neuropix-PXI-\d+\.', '', recording_name)
-    else:
-        return recording_name
+default_curation_dict = {
+    "format_version": "2",
+    "label_definitions": {
+        "quality":{
+            "label_options": ["good", "MUA", "noise"],
+            "exclusive": True,
+        }, 
+    },
+    "manual_labels": [],
+    "removed": [],
+    "merges": [],
+    "splits": [],
+}
 
 
 def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
@@ -46,6 +50,31 @@ def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
     elif ncols == 1:
         axs = axs[:, None]
     return fig, axs
+
+def _get_surface_channel(recording: si.BaseRecording, channel_labels: np.ndarray) -> int | None:
+    y_locs = recording.get_channel_locations()[:, 1]
+    surface_channel_y_position = None
+    if channel_labels is not None:
+        channel_ids_out = recording.channel_ids[channel_labels == 'out']
+
+        if len(channel_ids_out) == 0:
+           logging.info("No out channels detected")
+        else:
+            surface_channel_id = channel_ids_out[0]
+            surface_channel_index = recording.channel_ids.tolist().index(surface_channel_id)
+            surface_channel_y_position = y_locs[surface_channel_index]
+    
+    return surface_channel_y_position
+
+def recording_abbrv_name(recording_name):
+    """
+    Abbreviates recording name from Open Ephys stream by removing Record Node and Plugin source from the name.
+    """
+    import re
+    if "Record Node" in recording_name:
+        return re.sub(r'Record Node [^#]+#Neuropix-PXI-\d+\.', '', recording_name)
+    else:
+        return recording_name
 
 
 def load_preprocessed_recording(preprocessed_json_file, session_name, ecephys_folder, data_folder):
@@ -70,9 +99,9 @@ def load_preprocessed_recording(preprocessed_json_file, session_name, ecephys_fo
             except:
                 pass
         if recording_preprocessed is None:
-            logging.info(f"Error loading preprocessed data...")
+            logging.info("Error loading preprocessed data...")
     else:
-        logging.info(f"Preprocessed recording not found...")
+        logging.info("Preprocessed recording not found...")
     return recording_preprocessed
 
 
@@ -117,21 +146,39 @@ def get_recording_relative_path(recording):
     return relative_path
 
 
-def _get_surface_channel(recording: si.BaseRecording, channel_labels: np.ndarray) -> int | None:
-    y_locs = recording.get_channel_locations()[:, 1]
-    surface_channel_y_position = None
-    if channel_labels is not None:
-        channel_ids_out = recording.channel_ids[channel_labels == 'out']
+def get_default_curation_value(sorting_analyzer: si.SortingAnalyzer) -> dict:
+    """
+    Generate default curation value dict from sorting analyzer.
 
-        if len(channel_ids_out) == 0:
-           logging.info(f"No out channels detected")
-        else:
-            surface_channel_id = channel_ids_out[0]
-            surface_channel_index = recording.channel_ids.tolist().index(surface_channel_id)
-            surface_channel_y_position = y_locs[surface_channel_index]
-    
-    return surface_channel_y_position
+    Parameters
+    ----------
+    sorting_analyzer : si.SortingAnalyzer
+        The sorting analyzer object.
 
+    Returns
+    -------
+    curation_value : dict
+        The default curation value dict.
+    """
+    # prepare the curation data using decoder labels
+    curation_dict = default_curation_dict.copy()
+    curation_dict["unit_ids"] = sorting_analyzer.unit_ids
+    if "decoder_label" in sorting_analyzer.sorting.get_property_keys():
+        decoder_labels = sorting_analyzer.get_sorting_property("decoder_label")
+        noise_units = sorting_analyzer.unit_ids[decoder_labels == "noise"]
+        curation_dict["removed"] = list(noise_units)
+        for unit_id in noise_units:
+            curation_dict["manual_labels"].append({"unit_id": unit_id, "quality": ["noise"]})
+    try:
+        validate_curation_dict(curation_dict)
+        # make it serializable
+        curation_dict = json.loads(json.dumps(check_json(curation_dict)))
+    except ValueError as e:
+        curation_dict = None
+    return curation_dict
+
+
+### METRICS GENERATION FUNCTIONS ###
 def plot_raw_data(
     recording: si.BaseRecording,
     recording_lfp: si.BaseRecording | None = None,
@@ -386,11 +433,8 @@ def generate_raw_qc(
     -------
     metrics : list[QCMetric]:
         The quality control metrics.
-    metric_names : list[str]
-        List of metric names added
     """
     metrics = []
-    metric_names = []
     recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
     now = datetime.now()
@@ -457,7 +501,6 @@ def generate_raw_qc(
         }
     )
     metrics.append(raw_data_metric)
-    metric_names.append("Raw Data")
 
     logging.info("Generating PSD metrics")
     fig_psd = plot_psd(recording, channel_labels=channel_labels)
@@ -493,7 +536,6 @@ def generate_raw_qc(
         }
     )
     metrics.append(psd_metric)
-    metric_names.append("PSD")
 
     logging.info("Generating NOISE metrics")
     fig_rms, ax_rms = plot_rms_by_depth(recording, recording_preprocessed, channel_labels=channel_labels)
@@ -554,9 +596,8 @@ def generate_raw_qc(
         }
     )
     metrics.append(rms_metric)
-    metric_names.append("RMS")
 
-    return metrics, metric_names
+    return metrics
 
 
 def generate_drift_qc(
@@ -586,8 +627,6 @@ def generate_drift_qc(
     -------
     metrics : list[QCMetric]:
         The quality control metrics.
-    metric_names : list[str]
-        List of metric names added
     """
 
     logging.info("Generating DRIFT metric")
@@ -595,11 +634,6 @@ def generate_drift_qc(
     recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(parents=True, exist_ok=True)
     recording_name_abbrv = recording_abbrv_name(recording_name)
-
-    # open displacement arrays
-    if not motion_path.is_dir():
-        logging.info(f"\tMotion not found for {recording_name}")
-        return {}
 
     motion_info = spre.load_motion_info(motion_path)
     all_peaks = motion_info["peaks"]
@@ -695,7 +729,7 @@ def generate_drift_qc(
     )
     drift_metrics = [drift_metric]
 
-    return drift_metrics, ["Probe Drift"]
+    return drift_metrics
 
 
 def generate_event_qc(
@@ -715,8 +749,6 @@ def generate_event_qc(
     -------
     metrics : list[QCMetric]:
         The quality control metrics.
-    metric_names : list[str]
-        List of metric names added
     """
     recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
@@ -735,7 +767,6 @@ def generate_event_qc(
         saturation_threshold_uv = saturation_thresholds_uv.get(part_number)
 
     metrics = []
-    metric_names = []
     if saturation_threshold_uv is None:
         logging.info(f"\tSaturation threshold for {recording_name}. Cannot generate saturation metrics.")
     else:
@@ -803,12 +834,11 @@ def generate_event_qc(
             value=value,
             status_history=[saturation_status],
             tags={
-            "probe": recording_name_abbrv
-        }
+                "probe": recording_name_abbrv
+            }
         )
 
         metrics.append(saturation_timeline_metric)
-        metric_names.append("Saturation timeline")
 
     if event_dict is not None:
         logging.info("Generating TRIGGER EVENT metrics")
@@ -909,9 +939,8 @@ def generate_event_qc(
         }
             )
             metrics.append(trigger_event_metric)
-            metric_names.append("Trigger events")
 
-    return metrics, metric_names
+    return metrics
 
 
 def generate_units_qc(
@@ -953,11 +982,8 @@ def generate_units_qc(
     -------
     metrics : list[QCMetric]:
         The quality control metrics.
-    metric_names : list[str]
-        List of metric names added
     """    
     metrics = []
-    metric_names = []
     recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
     now = datetime.now()
@@ -1142,7 +1168,6 @@ def generate_units_qc(
         }
     )
     metrics.append(yield_metric)
-    metric_names.append("Unit Yield")
 
     logging.info("Generating FIRING RATE metric")
     num_segments = sorting_analyzer.get_num_segments()
@@ -1205,7 +1230,6 @@ def generate_units_qc(
         }
     )
     metrics.append(firing_rate_metric)
-    metric_names.append("Firing Rate")
 
     logging.info("Generating SORTING CURATION metric")
     curation_link = "https://ephys.allenneuraldynamics.org/ephys_gui_app?analyzer_path={derived_asset_location}/postprocessed/"
@@ -1223,23 +1247,38 @@ def generate_units_qc(
         "You can use the GUI to curate spike sorting results (label, remove, merge, split). "
         "Use the 'Submit to parent' button to submit the curation data to the QC Portal."
     )
+    # Create default curation value from curation
+    curation_dict = get_default_curation_value(sorting_analyzer)
+    if curation_dict is not None:
+        curation_value = [curation_dict]
+        curation_history = [
+            CurationHistory(
+                curator="Ephys pipeline",
+                timestamp=now,
+            )
+        ]
+    else:
+        logging.info("\tCurated dictionary is invalid.")
+        curation_value = []
+        curation_history = []
+
     sorting_curation_metric = CurationMetric(
         name=f"Sorting Curation - {recording_name_abbrv}",
         type="Spike sorting curation",
+        value=curation_value,
+        curation_history=curation_history,
         modality=Modality.ECEPHYS,
         stage=Stage.PROCESSING,
         description=sorting_curation_metric_description,
         reference=curation_link_url,
-        value=[],
         status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
         tags={
             "probe": recording_name_abbrv
         }
     )
     metrics.append(sorting_curation_metric)
-    metric_names.append("Sorting Curation")
 
-    return metrics, metric_names
+    return metrics
 
 
 ### EVENTS UTILS
