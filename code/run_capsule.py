@@ -105,8 +105,8 @@ if __name__ == "__main__":
     logging.info(f"\tCOMPUTE EVENT METRICS: {COMPUTE_EVENT_METRIC}")
     logging.info(f"\tMIN DURATION ALLOW FAILED: {MIN_DURATION_ALLOW_FAILED}")
 
-    # Use CO_CPUS/SLURM_CPUS_ON_NODE env variable if available
-    N_JOBS_EXT = os.getenv("CO_CPUS") or os.getenv("SLURM_CPUS_ON_NODE") or os.getenv("SLURM_CPUS_PER_TASK")
+    # Use CO_CPUS/N_JOBS_EXT env variable if available
+    N_JOBS_EXT = os.getenv("CO_CPUS") or os.getenv("N_JOBS_EXT")
     N_JOBS = int(N_JOBS_EXT) if N_JOBS_EXT is not None else -1
     job_kwargs = dict(n_jobs=N_JOBS, progress_bar=False, mp_context="spawn")
     si.set_global_job_kwargs(**job_kwargs)
