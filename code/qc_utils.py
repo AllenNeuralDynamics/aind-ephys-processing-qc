@@ -768,7 +768,10 @@ def generate_event_qc(
 
     metrics = []
     if saturation_threshold_uv is None:
-        logging.info(f"\tSaturation threshold for {recording_name}. Cannot generate saturation metrics.")
+        logging.info(
+            f"\tSaturation threshold for {recording_name} not available. "
+            "Cannot generate saturation metrics."
+        )
     else:
         pos_evts, neg_evts = find_saturation_events(recording, saturation_threshold_uv, **job_kwargs)
 
@@ -1231,52 +1234,55 @@ def generate_units_qc(
     )
     metrics.append(firing_rate_metric)
 
-    logging.info("Generating SORTING CURATION metric")
-    curation_link = "https://ephys.allenneuraldynamics.org/ephys_gui_app?analyzer_path={derived_asset_location}/postprocessed/"
-    curation_link += f"{recording_name}.zarr&recording_path="
     if raw_recording is not None:
-        curation_link += "{raw_asset_location}/"
         # figure out whether ecephys_compressed or ecephys/ecephys_compressed #TODO
         recording_relative_path = get_recording_relative_path(raw_recording)
-        curation_link += recording_relative_path
+        if recording_relative_path is None:
+            curation_link = None
+        else:
+            curation_link = "https://ephys.allenneuraldynamics.org/ephys_gui_app?analyzer_path={derived_asset_location}/postprocessed/"
+            curation_link += f"{recording_name}.zarr&recording_path="
+            curation_link += "{raw_asset_location}/"
+            curation_link += recording_relative_path
 
-    curation_link_url = quote(curation_link)
+    if curation_link is not None:
+        logging.info("Generating SORTING CURATION metric")
+        curation_link_url = quote(curation_link)
+        sorting_curation_metric_description = (
+            "This metric renders the SpikeInterface GUI through the AIND ephys portal. "
+            "You can use the GUI to curate spike sorting results (label, remove, merge, split). "
+            "Use the 'Submit to parent' button to submit the curation data to the QC Portal."
+        )
+        # Create default curation value from curation
+        curation_dict = get_default_curation_value(sorting_analyzer)
+        if curation_dict is not None:
+            curation_value = [curation_dict]
+            curation_history = [
+                CurationHistory(
+                    curator="Ephys pipeline",
+                    timestamp=now,
+                )
+            ]
+        else:
+            logging.info("\tCurated dictionary is invalid.")
+            curation_value = []
+            curation_history = []
 
-    sorting_curation_metric_description = (
-        "This metric renders the SpikeInterface GUI through the AIND ephys portal. "
-        "You can use the GUI to curate spike sorting results (label, remove, merge, split). "
-        "Use the 'Submit to parent' button to submit the curation data to the QC Portal."
-    )
-    # Create default curation value from curation
-    curation_dict = get_default_curation_value(sorting_analyzer)
-    if curation_dict is not None:
-        curation_value = [curation_dict]
-        curation_history = [
-            CurationHistory(
-                curator="Ephys pipeline",
-                timestamp=now,
-            )
-        ]
-    else:
-        logging.info("\tCurated dictionary is invalid.")
-        curation_value = []
-        curation_history = []
-
-    sorting_curation_metric = CurationMetric(
-        name=f"Sorting Curation - {recording_name_abbrv}",
-        type="Spike sorting curation",
-        value=curation_value,
-        curation_history=curation_history,
-        modality=Modality.ECEPHYS,
-        stage=Stage.PROCESSING,
-        description=sorting_curation_metric_description,
-        reference=curation_link_url,
-        status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
-        tags={
-            "probe": recording_name_abbrv
-        }
-    )
-    metrics.append(sorting_curation_metric)
+        sorting_curation_metric = CurationMetric(
+            name=f"Sorting Curation - {recording_name_abbrv}",
+            type="Spike sorting curation",
+            value=curation_value,
+            curation_history=curation_history,
+            modality=Modality.ECEPHYS,
+            stage=Stage.PROCESSING,
+            description=sorting_curation_metric_description,
+            reference=curation_link_url,
+            status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
+            tags={
+                "probe": recording_name_abbrv
+            }
+        )
+        metrics.append(sorting_curation_metric)
 
     return metrics
 
