@@ -1044,7 +1044,7 @@ def generate_units_qc(
     ax_snr.spines[["top", "right"]].set_visible(False)
 
     ax_halfwidth = axs_yield[1, 2]
-    half_width_name = 'trough_half_width' if 'trough_half_width' in template_metrics eles 'half_width'
+    half_width_name = 'trough_half_width' if 'trough_half_width' in template_metrics.columns else 'half_width'
     if not np.isnan(template_metrics[half_width_name]).all():
         ax_halfwidth.hist(template_metrics[half_width_name], bins=20, density=True)
     ax_halfwidth.set_title(f"Half Width")
