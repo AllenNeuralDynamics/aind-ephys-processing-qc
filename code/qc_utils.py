@@ -1346,14 +1346,14 @@ def find_saturation_events(
         The negative saturation events.
     """
     from spikeinterface.core.node_pipeline import run_node_pipeline
-    from spikeinterface.sortingcomponents.peak_detection import DetectPeakLocallyExclusive
+    from spikeinterface.sortingcomponents.peak_detection.locally_exclusive import LocallyExclusivePeakDetector
 
     channel_distance = si.get_channel_distances(recording)
     neighbours_mask = channel_distance <= radius_um
     num_channels = recording.get_num_channels()
 
     # here we set absolute thresholds externally, since we know the saturation thresholds
-    saturation_both = DetectPeakLocallyExclusive(recording, noise_levels=np.ones(num_channels))
+    saturation_both = LocallyExclusivePeakDetector(recording, noise_levels=np.ones(num_channels))
     abs_thresholds = np.array([saturation_threshold_uv / recording.get_channel_gains()[0]] * num_channels)
     saturation_both.args = ("both", abs_thresholds, exclude_sweep_ms, neighbours_mask)
 
