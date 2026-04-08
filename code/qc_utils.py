@@ -112,7 +112,7 @@ def load_processing_metadata(processing_json):
     with open(processing_json) as f:
         processing_dict = json.load(f)
     processing_dict.pop("schema_version")
-    data_processes = processing_dict["processing_pipeline"]["data_processes"]
+    data_processes = processing_dict["data_processes"]
     new_data_processes = []
     for dp in data_processes:
         if isinstance(dp, list):
@@ -120,7 +120,7 @@ def load_processing_metadata(processing_json):
                 new_data_processes.append(dpp)
         else:
             new_data_processes.append(dp)
-    processing_dict["processing_pipeline"]["data_processes"] = new_data_processes
+    processing_dict["data_processes"] = new_data_processes
     return Processing(**processing_dict)
 
 
