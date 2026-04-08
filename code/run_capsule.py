@@ -14,8 +14,8 @@ from pathlib import Path
 import spikeinterface as si
 
 # AIND
-from aind_data_schema_models.modalities import Modality
-from aind_data_schema.core.quality_control import QualityControl, Stage
+from aind_data_schema.core.processing import Processing
+from aind_data_schema.core.quality_control import QualityControl
 
 try:
     from aind_log_utils import log
@@ -25,7 +25,6 @@ except ImportError:
 
 from qc_utils import (
     load_preprocessed_recording,
-    load_processing_metadata,
     recording_abbrv_name,
     generate_raw_qc,
     generate_units_qc,
@@ -200,7 +199,9 @@ if __name__ == "__main__":
         processing_json_file = ecephys_sorted_folder / "processing.json"
         if processing_json_file.is_file():
             try:
-                processing = load_processing_metadata(processing_json_file)
+                with open(processing_json_file) as f:
+                    processing_data = json.load(f)
+                processing = Processing(**processing_data)
             except:
                 logging.info(f"Failed to load processing.json")
 

@@ -105,25 +105,6 @@ def load_preprocessed_recording(preprocessed_json_file, session_name, ecephys_fo
     return recording_preprocessed
 
 
-def load_processing_metadata(processing_json):
-    """
-    Loads processing metadata.
-    """
-    with open(processing_json) as f:
-        processing_dict = json.load(f)
-    processing_dict.pop("schema_version")
-    data_processes = processing_dict["processing_pipeline"]["data_processes"]
-    new_data_processes = []
-    for dp in data_processes:
-        if isinstance(dp, list):
-            for dpp in dp:
-                new_data_processes.append(dpp)
-        else:
-            new_data_processes.append(dp)
-    processing_dict["processing_pipeline"]["data_processes"] = new_data_processes
-    return Processing(**processing_dict)
-
-
 def get_recording_relative_path(recording):
     """
     Returns path of recording file relative to session folder.
@@ -1352,14 +1333,14 @@ def find_saturation_events(
         The negative saturation events.
     """
     from spikeinterface.core.node_pipeline import run_node_pipeline
-    from spikeinterface.sortingcomponents.peak_detection import DetectPeakLocallyExclusive
+    from spikeinterface.sortingcomponents.peak_detection.locally_exclusive import LocallyExclusivePeakDetector
 
     channel_distance = si.get_channel_distances(recording)
     neighbours_mask = channel_distance <= radius_um
     num_channels = recording.get_num_channels()
 
     # here we set absolute thresholds externally, since we know the saturation thresholds
-    saturation_both = DetectPeakLocallyExclusive(recording, noise_levels=np.ones(num_channels))
+    saturation_both = LocallyExclusivePeakDetector(recording, noise_levels=np.ones(num_channels))
     abs_thresholds = np.array([saturation_threshold_uv / recording.get_channel_gains()[0]] * num_channels)
     saturation_both.args = ("both", abs_thresholds, exclude_sweep_ms, neighbours_mask)
 
