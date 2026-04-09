@@ -321,15 +321,19 @@ if __name__ == "__main__":
                 all_metrics.extend(metrics_drift)
         
         if ecephys_sorted_folder is not None:
-            metrics_units = generate_units_qc(
-                sorting_analyzer,
-                recording_name,
-                quality_control_fig_folder,
-                relative_to=results_folder,
-                visualization_output=visualization_output,
-                raw_recording=recording,
-            )
-            all_metrics.extend(metrics_units)
+            # generate unit metrics rely on quality/template metrics computed in postprocessing
+            if sorting_analyzer.has_extension("quality_metrics") and sorting_analyzer.has_extension("template_metrics"):
+                metrics_units = generate_units_qc(
+                    sorting_analyzer,
+                    recording_name,
+                    quality_control_fig_folder,
+                    relative_to=results_folder,
+                    visualization_output=visualization_output,
+                    raw_recording=recording,
+                )
+                all_metrics.extend(metrics_units)
+            else:
+                logging.info(f"\tQuality/Template metrics not found for {recording_name}. Skipping unit metrics.")
 
         # If recording is too short, allow tagged metrics to fail
         if recording.get_total_duration() < MIN_DURATION_ALLOW_FAILED:
