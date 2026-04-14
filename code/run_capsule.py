@@ -320,6 +320,9 @@ if __name__ == "__main__":
                 all_metrics.extend(metrics_drift)
         
         if ecephys_sorted_folder is not None:
+            curation_json_file = ecephys_sorted_folder / "curated" / recording_name / "curation.json"
+            if not curation_json_file.is_file():
+                curation_json_file = None
             metrics_units = generate_units_qc(
                 sorting_analyzer,
                 recording_name,
@@ -327,6 +330,7 @@ if __name__ == "__main__":
                 relative_to=results_folder,
                 visualization_output=visualization_output,
                 raw_recording=recording,
+                curation_json_file=curation_json_file
             )
             all_metrics.extend(metrics_units)
 

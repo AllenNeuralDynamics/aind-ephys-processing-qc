@@ -25,21 +25,6 @@ from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status, St
 from aind_qcportal_schema.metric_value import DropdownMetric
 
 
-default_curation_dict = {
-    "format_version": "2",
-    "label_definitions": {
-        "quality":{
-            "label_options": ["good", "MUA", "noise"],
-            "exclusive": True,
-        }, 
-    },
-    "manual_labels": [],
-    "removed": [],
-    "merges": [],
-    "splits": [],
-}
-
-
 def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
     figsize = (subplot_figsize[0] * ncols, subplot_figsize[1] * nrows)
     fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
@@ -144,38 +129,6 @@ def get_recording_relative_path(recording):
                 relative_path = file_path[substring_index:]
                 break
     return relative_path
-
-
-def get_default_curation_value(sorting_analyzer: si.SortingAnalyzer) -> dict:
-    """
-    Generate default curation value dict from sorting analyzer.
-
-    Parameters
-    ----------
-    sorting_analyzer : si.SortingAnalyzer
-        The sorting analyzer object.
-
-    Returns
-    -------
-    curation_value : dict
-        The default curation value dict.
-    """
-    # prepare the curation data using decoder labels
-    curation_dict = default_curation_dict.copy()
-    curation_dict["unit_ids"] = sorting_analyzer.unit_ids
-    if "decoder_label" in sorting_analyzer.sorting.get_property_keys():
-        decoder_labels = sorting_analyzer.get_sorting_property("decoder_label")
-        noise_units = sorting_analyzer.unit_ids[decoder_labels == "noise"]
-        curation_dict["removed"] = list(noise_units)
-        for unit_id in noise_units:
-            curation_dict["manual_labels"].append({"unit_id": unit_id, "quality": ["noise"]})
-    try:
-        validate_curation_dict(curation_dict)
-        # make it serializable
-        curation_dict = json.loads(json.dumps(check_json(curation_dict)))
-    except ValueError as e:
-        curation_dict = None
-    return curation_dict
 
 
 ### METRICS GENERATION FUNCTIONS ###
@@ -953,6 +906,7 @@ def generate_units_qc(
     max_amplitude_for_visualization: float = 5000,
     max_firing_rate_for_visualization: float = 50,
     bin_duration_hist_s: float = 1,
+    curation_json_file: Path | None = None
 ) -> dict[str : list[QCMetric]]:
     """
     Generate unit yield metrics for a given sorting result.
@@ -1249,16 +1203,18 @@ def generate_units_qc(
         "Use the 'Submit to parent' button to submit the curation data to the QC Portal."
     )
     # Create default curation value from curation
-    # TODO: add merges!
-    curation_dict = get_default_curation_value(sorting_analyzer)
-    if curation_dict is not None:
-        curation_value = [curation_dict]
-        curation_history = [
-            CurationHistory(
-                curator="Ephys pipeline",
-                timestamp=now,
-            )
-        ]
+    curation_dict = None
+    if curation_json_file is not None:
+        with open(curation_json_file, "r") as f:
+            curation_dict = json.load(f)
+        if curation_dict is not None:
+            curation_value = [curation_dict]
+            curation_history = [
+                CurationHistory(
+                    curator="Ephys pipeline",
+                    timestamp=now,
+                )
+            ]
     else:
         logging.info("\tCurated dictionary is invalid.")
         curation_value = []
