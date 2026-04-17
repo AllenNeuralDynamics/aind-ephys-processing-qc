@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+from matplotlib.lines import Line2D
+
 from scipy.signal import welch, savgol_filter
 
 import spikeinterface as si
@@ -679,16 +681,20 @@ def generate_drift_qc(
         max_cumulative_drift = np.round(cumulative_drifts[max_cumulative_drift_index], 2)
         depth_at_max_cumulative_drift = int(spatial_bins[max_cumulative_drift_index])
 
-        ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="red", alpha=0.5, label=motion_preset)
+        ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="red", alpha=0.5)
+
+        legend_lines = [Line2D([0], [0], color='red', lw=1, label=motion_preset)]
+        ax_drift.get_lines()[-1].set_label(motion_preset)
 
         if motion_sorter is not None:
             displacement_arr = motion_sorter.displacement[segment_index]
             temporal_bins = motion_sorter.temporal_bins_s[segment_index]
             spatial_bins = motion_sorter.spatial_bins_um
 
-            ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="green", alpha=0.5, label="sorter")
+            ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="green", alpha=0.5)
+            legend_lines.append(Line2D([0], [0], color='green', lw=1, label='sorter'))
 
-    ax_drift.legend()
+    ax_drift.legend(handles=legend_lines)
 
     ax_drift.set_title(
         f"Preset: {motion_preset}\n"
