@@ -686,7 +686,7 @@ def generate_drift_qc(
             temporal_bins = motion_sorter.temporal_bins_s[segment_index]
             spatial_bins = motion_sorter.spatial_bins_um
 
-            ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="gren", alpha=0.5, label="sorter")
+            ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="green", alpha=0.5, label="sorter")
 
     ax_drift.legend()
 
