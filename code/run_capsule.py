@@ -306,6 +306,7 @@ if __name__ == "__main__":
         
         if ecephys_sorted_folder is not None:
             motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
+            motion_sorter_path = ecephys_sorted_folder / "spikesorted" / "motion" / recording_name
 
             # open displacement arrays
             if not motion_path.is_dir():
@@ -314,8 +315,9 @@ if __name__ == "__main__":
                 metrics_drift = generate_drift_qc(
                     recording,
                     recording_name,
-                    motion_path,
-                    quality_control_fig_folder,
+                    output_qc_path=quality_control_fig_folder,
+                    motion_path=motion_path,
+                    motion_sorter_path=motion_sorter_path,
                     relative_to=results_folder,
                 )
                 all_metrics.extend(metrics_drift)
