@@ -15,6 +15,7 @@ RUN pip install -U --no-cache-dir \
     aind-data-schema==2.4.0 \
     aind-log-utils==0.2.3 \
     aind-qcportal-schema==0.6.4 \
+    matplotlib-venn==1.1.2 \
     s3fs==2025.5.1 \
     spikeinterface[full,widgets]==0.104.0 \
     wavpack-numcodecs==0.2.2
