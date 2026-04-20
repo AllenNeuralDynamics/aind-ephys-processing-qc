@@ -938,47 +938,47 @@ def generate_unit_yield_qc(
         if uid in curation_noise_ids:
             neural_noise_labels[i] = "noise"
 
-    metrics = sorting_analyzer.get_metrics_extension_data()
+    all_metrics = sorting_analyzer.get_metrics_extension_data()
 
     fig_yield, axs_yield = plt.subplots(3, 3, figsize=(15, 10))
 
     # protect against all NaNs
     bins = np.linspace(0, 2, 20)
     ax_rpc = axs_yield[0, 0]
-    if not np.isnan(metrics["rp_contamination"]).all():
-        ax_rpc.hist(metrics["rp_contamination"], bins=bins, density=True)
+    if not np.isnan(all_metrics["rp_contamination"]).all():
+        ax_rpc.hist(all_metrics["rp_contamination"], bins=bins, density=True)
     ax_rpc.set_xscale("log")
     ax_rpc.set_title(f"RP Contamination")
     ax_rpc.spines[["top", "right"]].set_visible(False)
 
     ax_amp_cutoff = axs_yield[0, 1]
-    if not np.isnan(metrics["amplitude_cutoff"]).all():
-        ax_amp_cutoff.hist(metrics["amplitude_cutoff"], bins=20, density=True)
+    if not np.isnan(all_metrics["amplitude_cutoff"]).all():
+        ax_amp_cutoff.hist(all_metrics["amplitude_cutoff"], bins=20, density=True)
     ax_amp_cutoff.set_title(f"Amplitude Cutoff")
     ax_amp_cutoff.spines[["top", "right"]].set_visible(False)
 
     ax_presence_ratio = axs_yield[0, 2]
-    if not np.isnan(metrics["presence_ratio"]).all():
-        ax_presence_ratio.hist(metrics["presence_ratio"], bins=20, density=True)
+    if not np.isnan(all_metrics["presence_ratio"]).all():
+        ax_presence_ratio.hist(all_metrics["presence_ratio"], bins=20, density=True)
     ax_presence_ratio.set_title(f"Presence Ratio")
     ax_presence_ratio.spines[["top", "right"]].set_visible(False)
 
     ax_drift = axs_yield[1, 0]
-    if not np.isnan(metrics['drift_ptp']).all():
-        ax_drift.hist(metrics['drift_ptp'], bins=20, density=True)
+    if not np.isnan(all_metrics['drift_ptp']).all():
+        ax_drift.hist(all_metrics['drift_ptp'], bins=20, density=True)
     ax_drift.set_title(f"Drift Peak to Peak")
     ax_drift.spines[["top", "right"]].set_visible(False)
 
     ax_snr = axs_yield[1, 1]
-    if not np.isnan(metrics['snr']).all():
-        ax_snr.hist(metrics['snr'], bins=20, density=True)
+    if not np.isnan(all_metrics['snr']).all():
+        ax_snr.hist(all_metrics['snr'], bins=20, density=True)
     ax_snr.set_title(f"SNR")
     ax_snr.spines[["top", "right"]].set_visible(False)
 
     ax_halfwidth = axs_yield[1, 2]
-    half_width_name = 'trough_half_width' if 'trough_half_width' in metrics.columns else 'half_width'
-    if not np.isnan(metrics[half_width_name]).all():
-        ax_halfwidth.hist(metrics[half_width_name], bins=20, density=True)
+    half_width_name = 'trough_half_width' if 'trough_half_width' in all_metrics.columns else 'half_width'
+    if not np.isnan(all_metrics[half_width_name]).all():
+        ax_halfwidth.hist(all_metrics[half_width_name], bins=20, density=True)
     ax_halfwidth.set_title(f"Half Width")
     ax_halfwidth.spines[["top", "right"]].set_visible(False)
 
@@ -1028,7 +1028,7 @@ def generate_unit_yield_qc(
     ax_amplitudes.spines[["top", "right"]].set_visible(False)
 
     ax_fr = axs_yield[2, 1]
-    firing_rate = np.array(metrics["firing_rate"].tolist())
+    firing_rate = np.array(all_metrics["firing_rate"].tolist())
 
     x_max_fr = float(min(np.nanpercentile(firing_rate, 99), max_firing_rate_for_visualization))
     fr_plot = np.minimum(firing_rate, x_max_fr)
@@ -1065,7 +1065,7 @@ def generate_unit_yield_qc(
     ax_fr.spines[["top", "right"]].set_visible(False)
 
     ax_rp = axs_yield[2, 2]
-    rp_contamination = metrics["rp_contamination"].to_numpy() if "rp_contamination" in metrics.columns else None
+    rp_contamination = all_metrics["rp_contamination"].to_numpy() if "rp_contamination" in all_metrics.columns else None
 
     if rp_contamination is not None and not np.isnan(rp_contamination).all():
         x_max_rp = float(min(np.nanpercentile(rp_contamination, 99), 1.0))
