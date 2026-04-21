@@ -1314,13 +1314,13 @@ def generate_curation_qc(
             n_unitefine_sua = int(np.sum(unitrefine_label == "sua"))
             n_unitefine_mua = int(np.sum(unitrefine_label == "mua"))
             n_unitefine_noise_ur = int(np.sum(unitrefine_label == "noise"))
-            summary_lines += ["UnitRefine — SUA: {n_sua}  MUA: {n_mua}  noise: {n_noise_ur}\n"]
+            summary_lines += [f"UnitRefine:\nSUA: {n_sua}  MUA: {n_mua}  noise: {n_noise_ur}\n"]
         if bombcell_label is not None:
             n_bc_good = int(np.sum(bombcell_label == "good"))
             n_bc_mua = int(np.sum(bombcell_label == "mua"))
             n_bc_noise = int(np.sum(bombcell_label == "noise"))
             n_bc_non_soma = int(np.sum(bombcell_label == "non_soma"))
-            summary_lines += [f"Bombcell — good: {n_bc_good}  MUA: {n_bc_mua}\nnoise: {n_bc_noise}  non-somatic: {n_bc_non_soma}\n"]
+            summary_lines += [f"Bombcell:\ngood: {n_bc_good}  MUA: {n_bc_mua}  noise: {n_bc_noise}  non-somatic: {n_bc_non_soma}\n"]
 
         summary_lines += [f"SLAy merge groups: {n_merge_groups}"]
 
