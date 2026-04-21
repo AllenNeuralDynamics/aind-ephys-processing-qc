@@ -1259,62 +1259,70 @@ def generate_curation_qc(
     if sorting_analyzer is None:
         logging.info(f"\tNo sorting analyzer found for {recording_name}")
     else:
-        decoder_label = sorting_analyzer.sorting.get_property("decoder_label")
-        default_qc = sorting_analyzer.sorting.get_property("default_qc")
-        bombcell_label = sorting_analyzer.sorting.get_property("bombcell_label")
+        sorting = sorting_analyzer.sorting
+        property_keys = sorting.get_property_keys()
+        default_qc = sorting.get_property("default_qc") if "default_qc" in property_keys else None
+        unitrefine_label = sorting.get_property("unitrefine_label") if "unitrefine_label" in property_keys else None
+        bombcell_label = sorting.get_property("bombcell_label") if "bombcell_label" in property_keys else None
 
         n_total = sorting_analyzer.get_num_units()
         unit_indices = np.arange(n_total)
 
         set_default_qc = set(unit_indices[default_qc == True]) if default_qc is not None else set()
-        set_unitrefine_sua = set(unit_indices[decoder_label == "sua"]) if decoder_label is not None else set()
-        set_bombcell_good = set(unit_indices[bombcell_label == "good"]) if bombcell_label is not None else None
+        set_unitrefine_sua = set(unit_indices[unitrefine_label == "sua"]) if unitrefine_label is not None else set()
+        set_bombcell_good = set(unit_indices[bombcell_label == "good"]) if bombcell_label is not None else set()
 
         n_merge_groups = len(curation_dict.get("merges") or []) if curation_dict is not None else 0
 
         fig_curation, (ax_venn, ax_text) = plt.subplots(1, 2, figsize=(12, 5))
 
-        if set_bombcell_good is not None:
+        sets_venn, labels_venn = [], []
+        for label_venn, set_venn in zip(["Default QC", "UnitRefine SUA", "Bombcell Good"], [set_default_qc, set_unitrefine_sua, set_bombcell_good]):
+            if len(set_venn) > 0:
+                sets_venn.append(set_venn)
+                labels_venn.append(label_venn)
+        if len(sets_venn) == 3:
             venn3(
-                [set_default_qc, set_unitrefine_sua, set_bombcell_good],
-                set_labels=("Default QC", "UnitRefine SUA", "Bombcell"),
+                sets_venn,
+                set_labels=labels_venn,
+                ax=ax_venn,
+            )
+        elif len(sets_venn) == 2:
+            venn2(
+                sets_venn,
+                set_labels=labels_venn,
                 ax=ax_venn,
             )
         else:
-            venn2(
-                [set_default_qc, set_unitrefine_sua],
-                set_labels=("Default QC", "UnitRefine SUA"),
-                ax=ax_venn,
-            )
+            logging.info("Found less than two sets for labels. Not showing venn daigram")
         ax_venn.set_title("Good units overlap")
 
         ax_text.axis("off")
-        n_sua = int(np.sum(decoder_label == "sua")) if decoder_label is not None else 0
-        n_mua = int(np.sum(decoder_label == "mua")) if decoder_label is not None else 0
-        n_noise_ur = int(np.sum(decoder_label == "noise")) if decoder_label is not None else 0
-        n_default_good = int(np.sum(default_qc == True)) if default_qc is not None else 0
+
+        n_bc_good = int(np.sum(bombcell_label == "good"))
+        n_bc_mua = int(np.sum(bombcell_label == "mua"))
+        n_bc_noise = int(np.sum(bombcell_label == "noise"))
+        n_bc_non_soma = int(np.sum(bombcell_label == "non_soma"))
 
         summary_lines = [
-            f"Total units: {n_total}",
-            f"",
-            f"Default QC passing: {n_default_good}",
-            f"",
-            f"UnitRefine — SUA: {n_sua}  MUA: {n_mua}  noise: {n_noise_ur}",
+            f"Total units: {n_total}\n"
         ]
+        if default_qc is not None:
+            n_default_good = int(np.sum(default_qc == True))
+            summary_lines += [f"Default QC passing: {n_default_good}\n"]
+        if unitrefine_label is not None:
+            n_unitefine_sua = int(np.sum(unitrefine_label == "sua"))
+            n_unitefine_mua = int(np.sum(unitrefine_label == "mua"))
+            n_unitefine_noise_ur = int(np.sum(unitrefine_label == "noise"))
+            summary_lines += ["UnitRefine — SUA: {n_sua}  MUA: {n_mua}  noise: {n_noise_ur}\n"]
         if bombcell_label is not None:
             n_bc_good = int(np.sum(bombcell_label == "good"))
             n_bc_mua = int(np.sum(bombcell_label == "mua"))
             n_bc_noise = int(np.sum(bombcell_label == "noise"))
             n_bc_non_soma = int(np.sum(bombcell_label == "non_soma"))
-            summary_lines += [
-                f"",
-                f"Bombcell — good: {n_bc_good}  MUA: {n_bc_mua}",
-                f"           noise: {n_bc_noise}  non-somatic: {n_bc_non_soma}",
-            ]
-        summary_lines += [
-            f"",
-            f"SLAy merge groups: {n_merge_groups}",
-        ]
+            summary_lines += [f"Bombcell — good: {n_bc_good}  MUA: {n_bc_mua}\nnoise: {n_bc_noise}  non-somatic: {n_bc_non_soma}\n"]
+
+        summary_lines += [f"SLAy merge groups: {n_merge_groups}"]
 
         props = dict(boxstyle="round", facecolor="lightblue", alpha=0.4)
         ax_text.text(
