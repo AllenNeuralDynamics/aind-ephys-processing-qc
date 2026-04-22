@@ -1295,9 +1295,13 @@ def generate_curation_qc(
             )
         else:
             logging.info("Found less than two sets for labels. Not showing venn daigram")
-        ax_venn.set_title("Good units overlap")
 
-        ax_text.axis("off")
+        if len(sets_venn) > 1:
+            ax_venn.set_title("Good units overlap")
+            ax_text.axis("off")
+        else:
+            ax_venn.set_title("Not enough labels for Venn diagram")
+            ax_venn.axis("off")
 
         n_bc_good = int(np.sum(bombcell_label == "good"))
         n_bc_mua = int(np.sum(bombcell_label == "mua"))
@@ -1311,10 +1315,10 @@ def generate_curation_qc(
             n_default_good = int(np.sum(default_qc == True))
             summary_lines += [f"Default QC passing: {n_default_good}\n"]
         if unitrefine_label is not None:
-            n_unitefine_sua = int(np.sum(unitrefine_label == "sua"))
-            n_unitefine_mua = int(np.sum(unitrefine_label == "mua"))
-            n_unitefine_noise_ur = int(np.sum(unitrefine_label == "noise"))
-            summary_lines += [f"UnitRefine:\nSUA: {n_sua}  MUA: {n_mua}  noise: {n_noise_ur}\n"]
+            n_ur_sua = int(np.sum(unitrefine_label == "sua"))
+            n_ur_mua = int(np.sum(unitrefine_label == "mua"))
+            n_ur_noise = int(np.sum(unitrefine_label == "noise"))
+            summary_lines += [f"UnitRefine:\nSUA: {n_ur_sua}  MUA: {n_ur_mua}  noise: {n_ur_noise}\n"]
         if bombcell_label is not None:
             n_bc_good = int(np.sum(bombcell_label == "good"))
             n_bc_mua = int(np.sum(bombcell_label == "mua"))
