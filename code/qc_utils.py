@@ -27,21 +27,6 @@ from aind_data_schema.core.quality_control import QCMetric, QCStatus, Status, St
 from aind_qcportal_schema.metric_value import DropdownMetric
 
 
-default_curation_dict = {
-    "format_version": "2",
-    "label_definitions": {
-        "quality":{
-            "label_options": ["good", "MUA", "noise"],
-            "exclusive": True,
-        }, 
-    },
-    "manual_labels": [],
-    "removed": [],
-    "merges": [],
-    "splits": [],
-}
-
-
 def _get_fig_axs(nrows, ncols, subplot_figsize=(3, 3)):
     figsize = (subplot_figsize[0] * ncols, subplot_figsize[1] * nrows)
     fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize)
@@ -127,38 +112,6 @@ def get_recording_relative_path(recording):
                 relative_path = file_path[substring_index:]
                 break
     return relative_path
-
-
-def get_default_curation_value(sorting_analyzer: si.SortingAnalyzer) -> dict:
-    """
-    Generate default curation value dict from sorting analyzer.
-
-    Parameters
-    ----------
-    sorting_analyzer : si.SortingAnalyzer
-        The sorting analyzer object.
-
-    Returns
-    -------
-    curation_value : dict
-        The default curation value dict.
-    """
-    # prepare the curation data using decoder labels
-    curation_dict = default_curation_dict.copy()
-    curation_dict["unit_ids"] = sorting_analyzer.unit_ids
-    if "decoder_label" in sorting_analyzer.sorting.get_property_keys():
-        decoder_labels = sorting_analyzer.get_sorting_property("decoder_label")
-        noise_units = sorting_analyzer.unit_ids[decoder_labels == "noise"]
-        curation_dict["removed"] = list(noise_units)
-        for unit_id in noise_units:
-            curation_dict["manual_labels"].append({"unit_id": unit_id, "quality": ["noise"]})
-    try:
-        validate_curation_dict(curation_dict)
-        # make it serializable
-        curation_dict = json.loads(json.dumps(check_json(curation_dict)))
-    except ValueError as e:
-        curation_dict = None
-    return curation_dict
 
 
 ### METRICS GENERATION FUNCTIONS ###
@@ -951,46 +904,20 @@ def generate_event_qc(
     return metrics
 
 
-def generate_units_qc(
+def generate_unit_yield_qc(
     sorting_analyzer: si.SortingAnalyzer | None,
     recording_name: str,
     output_qc_path: Path,
     relative_to: Path | None = None,
     visualization_output: dict | None = None,
-    raw_recording: si.BaseRecording | None = None,
+    curation_json_file: Path | None = None,
     max_amplitude_for_visualization: float = 5000,
     max_firing_rate_for_visualization: float = 50,
-    bin_duration_hist_s: float = 1,
-) -> dict[str : list[QCMetric]]:
+) -> list[QCMetric]:
     """
-    Generate unit yield metrics for a given sorting result.
-
-    Parameters
-    ----------
-    sorting_analyzer : SortingAnalyzer
-        The sorting analyzer.
-    recording_name : str
-        The name of the recording.
-    output_qc_path : Path
-        The output path for the quality control.
-    relative_to : Path | None, default: None
-        The relative path to the output path.
-    visualization_output : dict | None, default: None
-        The visualization output dict.
-    raw_recording : BaseRecording
-        The raw recording (used to infer recording path)
-    max_amplitude_for_visualization : float, default: 5000
-        The maximum amplitude used for plotting.
-    max_firing_rate_for_visualization : float, default: 50
-        The maximum firing rate used for plotting.
-    bin_duration_hist_s : float, default: 1
-        The duration of the histogram bins.
-
-    Returns
-    -------
-    metrics : list[QCMetric]:
-        The quality control metrics.
-    """    
+    Generate unit yield metric: quality/template metric distributions + amplitude and
+    firing rate profiles by depth.
+    """
     metrics = []
     recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
@@ -1003,57 +930,63 @@ def generate_units_qc(
         logging.info(f"\tNo sorting analyzer found for {recording_name}")
         return metrics
 
-    number_of_units = sorting_analyzer.get_num_units()
+    # Build binary neural/noise labels for scatter coloring.
+    curation_noise_ids = set()
+    if curation_json_file is not None and Path(curation_json_file).is_file():
+        with open(curation_json_file) as f:
+            _curation_dict = json.load(f)
+        for entry in _curation_dict.get("manual_labels") or []:
+            for label_list in entry.get("labels", {}).values():
+                if "noise" in label_list:
+                    curation_noise_ids.add(entry["unit_id"])
 
-    decoder_label = sorting_analyzer.sorting.get_property("decoder_label")
-    number_of_sua_units = int(np.sum(decoder_label == "sua"))
-    number_of_mua_units = int(np.sum(decoder_label == "mua"))
-    number_of_noise_units = int(np.sum(decoder_label == "noise"))
+    unit_ids = sorting_analyzer.sorting.get_unit_ids()
+    neural_noise_labels = np.full(len(unit_ids), "neural", dtype=object)
+    for i, uid in enumerate(unit_ids):
+        if uid in curation_noise_ids:
+            neural_noise_labels[i] = "noise"
 
-    default_qc = sorting_analyzer.sorting.get_property("default_qc")
-    number_of_good_units = int(np.sum(default_qc == True))
-
-    quality_metrics = sorting_analyzer.get_extension("quality_metrics").get_data()
-    template_metrics = sorting_analyzer.get_extension("template_metrics").get_data()
+    all_metrics = sorting_analyzer.get_metrics_extension_data()
 
     fig_yield, axs_yield = plt.subplots(3, 3, figsize=(15, 10))
 
     # protect against all NaNs
     bins = np.linspace(0, 2, 20)
-    ax_isi = axs_yield[0, 0]
-    if not np.isnan(quality_metrics["isi_violations_ratio"]).all():
-        ax_isi.hist(quality_metrics["isi_violations_ratio"], bins=bins, density=True)
-    ax_isi.set_xscale("log")
-    ax_isi.set_title(f"ISI Violations Ratio")
-    ax_isi.spines[["top", "right"]].set_visible(False)
+    ax_rpc = axs_yield[0, 0]
+    if not np.isnan(all_metrics["rp_contamination"]).all():
+        ax_rpc.hist(all_metrics["rp_contamination"], bins=bins, density=True)
+    ax_rpc.set_xscale("log")
+    ax_rpc.set_title(f"RP Contamination")
+    ax_rpc.spines[["top", "right"]].set_visible(False)
 
     ax_amp_cutoff = axs_yield[0, 1]
-    if not np.isnan(quality_metrics["amplitude_cutoff"]).all():
-        ax_amp_cutoff.hist(quality_metrics["amplitude_cutoff"], bins=20, density=True)
+    if not np.isnan(all_metrics["amplitude_cutoff"]).all():
+        ax_amp_cutoff.hist(all_metrics["amplitude_cutoff"], bins=20, density=True)
     ax_amp_cutoff.set_title(f"Amplitude Cutoff")
     ax_amp_cutoff.spines[["top", "right"]].set_visible(False)
 
     ax_presence_ratio = axs_yield[0, 2]
-    if not np.isnan(quality_metrics["presence_ratio"]).all():
-        ax_presence_ratio.hist(quality_metrics["presence_ratio"], bins=20, density=True)
+    if not np.isnan(all_metrics["presence_ratio"]).all():
+        ax_presence_ratio.hist(all_metrics["presence_ratio"], bins=20, density=True)
     ax_presence_ratio.set_title(f"Presence Ratio")
     ax_presence_ratio.spines[["top", "right"]].set_visible(False)
 
     ax_drift = axs_yield[1, 0]
-    if not np.isnan(quality_metrics['drift_ptp']).all():
-        ax_drift.hist(quality_metrics['drift_ptp'], bins=20, density=True)
+    if not np.isnan(all_metrics['drift_ptp']).all():
+        ax_drift.hist(all_metrics['drift_ptp'], bins=20, density=True)
     ax_drift.set_title(f"Drift Peak to Peak")
     ax_drift.spines[["top", "right"]].set_visible(False)
 
     ax_snr = axs_yield[1, 1]
-    if not np.isnan(quality_metrics['snr']).all():
-        ax_snr.hist(quality_metrics['snr'], bins=20, density=True)
+    if not np.isnan(all_metrics['snr']).all():
+        ax_snr.hist(all_metrics['snr'], bins=20, density=True)
     ax_snr.set_title(f"SNR")
     ax_snr.spines[["top", "right"]].set_visible(False)
 
     ax_halfwidth = axs_yield[1, 2]
-    if not np.isnan(template_metrics['half_width']).all():
-        ax_halfwidth.hist(template_metrics['half_width'], bins=20, density=True)
+    half_width_name = 'trough_half_width' if 'trough_half_width' in all_metrics.columns else 'half_width'
+    if not np.isnan(all_metrics[half_width_name]).all():
+        ax_halfwidth.hist(all_metrics[half_width_name], bins=20, density=True)
     ax_halfwidth.set_title(f"Half Width")
     ax_halfwidth.spines[["top", "right"]].set_visible(False)
 
@@ -1062,22 +995,38 @@ def generate_units_qc(
     )
     channel_depths = sorting_analyzer.get_channel_locations()[channel_indices, 1]
     amplitudes = np.array(list(si.get_template_extremum_amplitude(sorting_analyzer, mode="peak_to_peak").values()))
-    amplitudes[amplitudes > max_amplitude_for_visualization] = max_amplitude_for_visualization
-    df_amplitudes_depths = pd.DataFrame({"amplitude": amplitudes, "channel_depth": channel_depths})
+
+    nn_colors = {"neural": "green", "noise": "red"}
+
+    # Use 99th-percentile as the axis cap so outliers don't compress the main cloud.
+    # Points beyond the cap are plotted as right-facing triangles at the cap line.
+    x_max_amp = float(min(np.nanpercentile(amplitudes, 99), max_amplitude_for_visualization))
+    amp_plot = np.minimum(amplitudes, x_max_amp)
+    n_clipped_amp = int(np.sum(amplitudes > x_max_amp))
+
+    df_amplitudes_depths = pd.DataFrame({"amplitude": amp_plot, "channel_depth": channel_depths})
     mean_amplitude_by_depth = df_amplitudes_depths.groupby("channel_depth").mean()
 
-    colors = {"sua": "green", "mua": "orange", "noise": "red"}
     ax_amplitudes = axs_yield[2, 0]
-    if decoder_label is not None:
-        for label in np.unique(decoder_label):
-            mask = decoder_label == label
-            ax_amplitudes.scatter(amplitudes[mask], channel_depths[mask], c=colors[label], label=label, alpha=0.4)
-    else:
-        ax_amplitudes.scatter(amplitudes, channel_depths, alpha=0.4)
+    for label in ("neural", "noise"):
+        mask = neural_noise_labels == label
+        normal = mask & (amplitudes <= x_max_amp)
+        clipped = mask & (amplitudes > x_max_amp)
+        if np.any(normal):
+            ax_amplitudes.scatter(amp_plot[normal], channel_depths[normal],
+                                  c=nn_colors[label], label=label, alpha=0.4, s=15)
+        if np.any(clipped):
+            ax_amplitudes.scatter(amp_plot[clipped], channel_depths[clipped],
+                                  c=nn_colors[label], marker=">", alpha=0.7, s=25)
+    if n_clipped_amp > 0:
+        ax_amplitudes.axvline(x_max_amp, color="gray", ls="--", lw=0.8, alpha=0.6)
+        ax_amplitudes.text(0.98, 0.02, f"{n_clipped_amp} clipped \u25b6",
+                           transform=ax_amplitudes.transAxes, ha="right", va="bottom",
+                           fontsize=8, color="gray")
 
     try:
         smoothed_amplitude = savgol_filter(mean_amplitude_by_depth["amplitude"], 10, 2)
-        ax_amplitudes.plot(smoothed_amplitude, mean_amplitude_by_depth.index.tolist(), c="r")
+        ax_amplitudes.plot(smoothed_amplitude, mean_amplitude_by_depth.index.tolist(), c="k", lw=1.5)
     except Exception:
         logging.info("Smooting amplitudes failed.")
     ax_amplitudes.set_title("Unit Amplitude By Depth")
@@ -1087,21 +1036,34 @@ def generate_units_qc(
     ax_amplitudes.spines[["top", "right"]].set_visible(False)
 
     ax_fr = axs_yield[2, 1]
-    firing_rate = np.array(quality_metrics["firing_rate"].tolist())
-    firing_rate[firing_rate > max_firing_rate_for_visualization] = max_firing_rate_for_visualization
-    df_firing_rate_depths = pd.DataFrame({"firing_rate": firing_rate, "channel_depth": channel_depths})
+    firing_rate = np.array(all_metrics["firing_rate"].tolist())
+
+    x_max_fr = float(min(np.nanpercentile(firing_rate, 99), max_firing_rate_for_visualization))
+    fr_plot = np.minimum(firing_rate, x_max_fr)
+    n_clipped_fr = int(np.sum(firing_rate > x_max_fr))
+
+    df_firing_rate_depths = pd.DataFrame({"firing_rate": fr_plot, "channel_depth": channel_depths})
     mean_firing_rate_by_depth = df_firing_rate_depths.groupby("channel_depth").mean()
 
-    if decoder_label is not None:
-        for label in np.unique(decoder_label):
-            mask = decoder_label == label
-            ax_fr.scatter(firing_rate[mask], channel_depths[mask], c=colors[label], label=label, alpha=0.4)
-    else:
-        ax_fr.scatter(firing_rate, channel_depths, alpha=0.4)
+    for label in ("neural", "noise"):
+        mask = neural_noise_labels == label
+        normal = mask & (firing_rate <= x_max_fr)
+        clipped = mask & (firing_rate > x_max_fr)
+        if np.any(normal):
+            ax_fr.scatter(fr_plot[normal], channel_depths[normal],
+                          c=nn_colors[label], label=label, alpha=0.4, s=15)
+        if np.any(clipped):
+            ax_fr.scatter(fr_plot[clipped], channel_depths[clipped],
+                          c=nn_colors[label], marker=">", alpha=0.7, s=25)
+    if n_clipped_fr > 0:
+        ax_fr.axvline(x_max_fr, color="gray", ls="--", lw=0.8, alpha=0.6)
+        ax_fr.text(0.98, 0.02, f"{n_clipped_fr} clipped \u25b6",
+                   transform=ax_fr.transAxes, ha="right", va="bottom",
+                   fontsize=8, color="gray")
 
     try:
         smoothed_firing_rate = savgol_filter(mean_firing_rate_by_depth["firing_rate"], 10, 2)
-        ax_fr.plot(smoothed_firing_rate, mean_firing_rate_by_depth.index.tolist(), c="r")
+        ax_fr.plot(smoothed_firing_rate, mean_firing_rate_by_depth.index.tolist(), c="k", lw=1.5)
     except Exception:
         logging.info("Smooting firing rates failed.")
     ax_fr.set_title("Unit Firing Rate By Depth")
@@ -1110,43 +1072,54 @@ def generate_units_qc(
     ax_fr.legend()
     ax_fr.spines[["top", "right"]].set_visible(False)
 
-    ax_text = axs_yield[2, 2]
-    ax_text.axis("off")
+    ax_rp = axs_yield[2, 2]
+    rp_contamination = all_metrics["rp_contamination"].to_numpy() if "rp_contamination" in all_metrics.columns else None
 
-    metric_values = {
-        "# units": number_of_units,
-        "# SUA": number_of_sua_units,
-        "# MUA": number_of_mua_units,
-        "# noise": number_of_noise_units,
-        "# passing default QC": number_of_good_units,
-    }
+    if rp_contamination is not None and not np.isnan(rp_contamination).all():
+        x_max_rp = float(min(np.nanpercentile(rp_contamination, 99), 1.0))
+        rp_plot = np.minimum(rp_contamination, x_max_rp)
+        n_clipped_rp = int(np.sum(rp_contamination > x_max_rp))
 
-    metric_values_str = None
-    for metric_name, metric_value in metric_values.items():
-        if metric_values_str is None:
-            metric_values_str = f"{metric_name}: {metric_value}"
-        else:
-            metric_values_str += f"\n{metric_name}: {metric_value}"
-    props = dict(boxstyle="round", facecolor="wheat", alpha=0.5)
-    ax_text.text(0, 1, metric_values_str, transform=ax_text.transAxes, fontsize=14, verticalalignment="top", bbox=props)
+        for label in ("neural", "noise"):
+            mask = neural_noise_labels == label
+            normal = mask & (rp_contamination <= x_max_rp)
+            clipped = mask & (rp_contamination > x_max_rp)
+            if np.any(normal):
+                ax_rp.scatter(rp_plot[normal], channel_depths[normal],
+                              c=nn_colors[label], label=label, alpha=0.4, s=15)
+            if np.any(clipped):
+                ax_rp.scatter(rp_plot[clipped], channel_depths[clipped],
+                              c=nn_colors[label], marker=">", alpha=0.7, s=25)
+        if n_clipped_rp > 0:
+            ax_rp.axvline(x_max_rp, color="gray", ls="--", lw=0.8, alpha=0.6)
+            ax_rp.text(0.98, 0.02, f"{n_clipped_rp} clipped \u25b6",
+                       transform=ax_rp.transAxes, ha="right", va="bottom",
+                       fontsize=8, color="gray")
+    else:
+        ax_rp.text(0.5, 0.5, "rp_contamination\nnot available",
+                   transform=ax_rp.transAxes, ha="center", va="center",
+                   fontsize=10, color="gray")
+
+    ax_rp.set_title("RP Contamination By Depth")
+    ax_rp.set_xlabel("RP Contamination")
+    ax_rp.set_ylabel("Depth ($\\mu m$)")
+    ax_rp.legend()
+    ax_rp.spines[["top", "right"]].set_visible(False)
 
     fig_yield.suptitle("Unit Metrics Yield", fontsize=15)
     fig_yield.tight_layout()
     unit_yield_path = recording_fig_folder / "unit_yield.png"
     fig_yield.savefig(unit_yield_path, dpi=300)
+    plt.close(fig_yield)
 
     if relative_to is not None:
         unit_yield_path = unit_yield_path.relative_to(relative_to)
 
-    sorting_summary_link = None
-    if visualization_output is not None:
-        if recording_name in visualization_output:
-            sorting_summary_link = visualization_output[recording_name].get("sorting_summary")
+    sorting_summary_str = None
+    if visualization_output is not None and recording_name in visualization_output:
+        sorting_summary_link = visualization_output[recording_name].get("sorting_summary")
+        if sorting_summary_link is not None:
             sorting_summary_str = f"[Sortingview]({sorting_summary_link})"
-        else:
-            sorting_summary_str = None
-    else:
-        sorting_summary_str = None
 
     value_with_options = {
         "value": "",
@@ -1156,9 +1129,9 @@ def generate_units_qc(
     }
     value = DropdownMetric(**value_with_options)
     yield_metric_description = (
-        "This metric displays a summary of spike sorted units, including distributions of key features "
-        "and number of units with different labels. Use this metric to report a low yield of units or "
-        "a disproportionate high number of bad units with respect to good units. "
+        "This metric displays a summary of spike sorted units, including distributions of key quality "
+        "and template metrics and depth profiles of amplitude and firing rate. Use this metric to "
+        "report a low yield of units or a disproportionate number of noise units. "
     )
     if sorting_summary_str is not None:
         yield_metric_description += f"The sorting summary can also be viewed in {sorting_summary_str}"
@@ -1171,13 +1144,35 @@ def generate_units_qc(
         reference=str(unit_yield_path),
         value=value,
         status_history=[status_pending],
-        tags={
-            "probe": recording_name_abbrv
-        }
+        tags={"probe": recording_name_abbrv}
     )
     metrics.append(yield_metric)
 
+    return metrics
+
+
+def generate_firing_rate_qc(
+    sorting_analyzer: si.SortingAnalyzer | None,
+    recording_name: str,
+    output_qc_path: Path,
+    relative_to: Path | None = None,
+    bin_duration_hist_s: float = 1,
+) -> list[QCMetric]:
+    """
+    Generate population firing rate metric: spike count histogram across time per segment.
+    """
+    metrics = []
+    recording_fig_folder = output_qc_path
+    recording_fig_folder.mkdir(exist_ok=True, parents=True)
+    now = datetime.now()
+    status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
+    recording_name_abbrv = recording_abbrv_name(recording_name)
+
     logging.info("Generating FIRING RATE metric")
+    if sorting_analyzer is None:
+        logging.info(f"\tNo sorting analyzer found for {recording_name}")
+        return metrics
+
     num_segments = sorting_analyzer.get_num_segments()
     fig_fr, axs_fr = _get_fig_axs(num_segments, 1, subplot_figsize=(5, 3))
     spike_vector = sorting_analyzer.sorting.to_spike_vector()
@@ -1210,6 +1205,7 @@ def generate_units_qc(
     fig_fr.tight_layout()
     firing_rate_path = recording_fig_folder / "firing_rate.png"
     fig_fr.savefig(firing_rate_path, dpi=300)
+    plt.close(fig_fr)
     if relative_to is not None:
         firing_rate_path = firing_rate_path.relative_to(relative_to)
 
@@ -1233,12 +1229,153 @@ def generate_units_qc(
         reference=str(firing_rate_path),
         value=value,
         status_history=[status_pending],
-        tags={
-            "probe": recording_name_abbrv
-        }
+        tags={"probe": recording_name_abbrv}
     )
     metrics.append(firing_rate_metric)
 
+    return metrics
+
+
+def generate_curation_qc(
+    sorting_analyzer: si.SortingAnalyzer | None,
+    recording_name: str,
+    output_qc_path: Path,
+    relative_to: Path | None = None,
+    raw_recording: si.BaseRecording | None = None,
+    curation_json_file: Path | None = None,
+) -> list[QCMetric]:
+    """
+    Generate automatic curation summary metric (Venn diagram + label counts + merge
+    summary) and the manual sorting curation metric (link to AIND ephys GUI).
+    """
+    from matplotlib_venn import venn2, venn3
+
+    metrics = []
+    recording_fig_folder = output_qc_path
+    recording_fig_folder.mkdir(exist_ok=True, parents=True)
+    now = datetime.now()
+    status_pending = QCStatus(evaluator="", status=Status.PENDING, timestamp=now)
+    recording_name_abbrv = recording_abbrv_name(recording_name)
+
+    # Load curation dict once — used for both the summary figure and the CurationMetric
+    curation_dict = None
+    if curation_json_file is not None:
+        with open(curation_json_file, "r") as f:
+            curation_dict = json.load(f)
+
+    logging.info("Generating AUTO CURATION SUMMARY metric")
+    if sorting_analyzer is None:
+        logging.info(f"\tNo sorting analyzer found for {recording_name}")
+    else:
+        sorting = sorting_analyzer.sorting
+        property_keys = sorting.get_property_keys()
+        default_qc = sorting.get_property("default_qc") if "default_qc" in property_keys else None
+        unitrefine_label = sorting.get_property("unitrefine_label") if "unitrefine_label" in property_keys else None
+        bombcell_label = sorting.get_property("bombcell_label") if "bombcell_label" in property_keys else None
+
+        n_total = sorting_analyzer.get_num_units()
+        unit_indices = np.arange(n_total)
+
+        set_default_qc = set(unit_indices[default_qc == True]) if default_qc is not None else set()
+        set_unitrefine_sua = set(unit_indices[unitrefine_label == "sua"]) if unitrefine_label is not None else set()
+        set_bombcell_good = set(unit_indices[bombcell_label == "good"]) if bombcell_label is not None else set()
+
+        n_merge_groups = len(curation_dict.get("merges") or []) if curation_dict is not None else 0
+
+        fig_curation, (ax_venn, ax_text) = plt.subplots(1, 2, figsize=(12, 5))
+
+        sets_venn, labels_venn = [], []
+        for label_venn, set_venn in zip(["Default QC", "UnitRefine SUA", "Bombcell Good"], [set_default_qc, set_unitrefine_sua, set_bombcell_good]):
+            if len(set_venn) > 0:
+                sets_venn.append(set_venn)
+                labels_venn.append(label_venn)
+        if len(sets_venn) == 3:
+            venn3(
+                sets_venn,
+                set_labels=labels_venn,
+                ax=ax_venn,
+            )
+        elif len(sets_venn) == 2:
+            venn2(
+                sets_venn,
+                set_labels=labels_venn,
+                ax=ax_venn,
+            )
+        else:
+            logging.info("Found less than two sets for labels. Not showing venn daigram")
+
+        if len(sets_venn) > 1:
+            ax_venn.set_title("Good units overlap")
+            ax_text.axis("off")
+        else:
+            ax_venn.set_title("Not enough labels for Venn diagram")
+            ax_venn.axis("off")
+
+        n_bc_good = int(np.sum(bombcell_label == "good"))
+        n_bc_mua = int(np.sum(bombcell_label == "mua"))
+        n_bc_noise = int(np.sum(bombcell_label == "noise"))
+        n_bc_non_soma = int(np.sum(bombcell_label == "non_soma"))
+
+        summary_lines = [
+            f"Total units: {n_total}\n"
+        ]
+        if default_qc is not None:
+            n_default_good = int(np.sum(default_qc == True))
+            summary_lines += [f"Default QC passing: {n_default_good}\n"]
+        if unitrefine_label is not None:
+            n_ur_sua = int(np.sum(unitrefine_label == "sua"))
+            n_ur_mua = int(np.sum(unitrefine_label == "mua"))
+            n_ur_noise = int(np.sum(unitrefine_label == "noise"))
+            summary_lines += [f"UnitRefine:\nSUA: {n_ur_sua}  MUA: {n_ur_mua}  noise: {n_ur_noise}\n"]
+        if bombcell_label is not None:
+            n_bc_good = int(np.sum(bombcell_label == "good"))
+            n_bc_mua = int(np.sum(bombcell_label == "mua"))
+            n_bc_noise = int(np.sum(bombcell_label == "noise"))
+            n_bc_non_soma = int(np.sum(bombcell_label == "non_soma"))
+            summary_lines += [f"Bombcell:\ngood: {n_bc_good}  MUA: {n_bc_mua}  noise: {n_bc_noise}  non-somatic: {n_bc_non_soma}\n"]
+
+        summary_lines += [f"SLAy merge groups: {n_merge_groups}"]
+
+        props = dict(boxstyle="round", facecolor="lightblue", alpha=0.4)
+        ax_text.text(
+            0.05, 0.95, "\n".join(summary_lines),
+            transform=ax_text.transAxes, fontsize=12,
+            verticalalignment="top", bbox=props,
+        )
+
+        fig_curation.suptitle("Auto Curation Summary", fontsize=15)
+        fig_curation.tight_layout()
+        curation_summary_path = recording_fig_folder / "curation_summary.png"
+        fig_curation.savefig(curation_summary_path, dpi=300)
+        plt.close(fig_curation)
+
+        if relative_to is not None:
+            curation_summary_path = curation_summary_path.relative_to(relative_to)
+
+        auto_curation_metric = QCMetric(
+            name=f"Auto Curation Summary - {recording_name_abbrv}",
+            modality=Modality.ECEPHYS,
+            stage=Stage.PROCESSING,
+            description=(
+                "This metric summarises the outputs of the automatic curation step, showing the "
+                "overlap of 'good' units identified by each method (Default QC, UnitRefine, Bombcell) "
+                "and the number of merge groups proposed by SLAy."
+            ),
+            reference=str(curation_summary_path),
+            value=DropdownMetric(
+                value="",
+                options=["Good", "Low yield", "Review needed"],
+                status=["Pass", "Fail", "Fail"],
+                type="dropdown",
+            ),
+            status_history=[status_pending],
+            tags={"probe": recording_name_abbrv},
+        )
+        metrics.append(auto_curation_metric)
+
+    logging.info("Generating SORTING CURATION metric")
+    curation_link = "https://ephys.allenneuraldynamics.org/ephys_gui_app?analyzer_path={derived_asset_location}/postprocessed/"
+    curation_link += f"{recording_name}.zarr&recording_path="
     if raw_recording is not None:
         # figure out whether ecephys_compressed or ecephys/ecephys_compressed #TODO
         recording_relative_path = get_recording_relative_path(raw_recording)
@@ -1273,21 +1410,31 @@ def generate_units_qc(
             curation_value = []
             curation_history = []
 
-        sorting_curation_metric = CurationMetric(
-            name=f"Sorting Curation - {recording_name_abbrv}",
-            type="Spike sorting curation",
-            value=curation_value,
-            curation_history=curation_history,
-            modality=Modality.ECEPHYS,
-            stage=Stage.PROCESSING,
-            description=sorting_curation_metric_description,
-            reference=curation_link_url,
-            status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
-            tags={
-                "probe": recording_name_abbrv
-            }
-        )
-        metrics.append(sorting_curation_metric)
+    if curation_dict is not None:
+        curation_value = [curation_dict]
+        curation_history = [CurationHistory(curator="Ephys pipeline", timestamp=now)]
+    else:
+        logging.info("\tCurated dictionary is invalid.")
+        curation_value = []
+        curation_history = []
+
+    sorting_curation_metric = CurationMetric(
+        name=f"Sorting Curation - {recording_name_abbrv}",
+        type="Spike sorting curation",
+        value=curation_value,
+        curation_history=curation_history,
+        modality=Modality.ECEPHYS,
+        stage=Stage.PROCESSING,
+        description=(
+            "This metric renders the SpikeInterface GUI through the AIND ephys portal. "
+            "You can use the GUI to curate spike sorting results (label, remove, merge, split). "
+            "Use the 'Submit to parent' button to submit the curation data to the QC Portal."
+        ),
+        reference=curation_link_url,
+        status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
+        tags={"probe": recording_name_abbrv},
+    )
+    metrics.append(sorting_curation_metric)
 
     return metrics
 
@@ -1356,8 +1503,9 @@ def find_saturation_events(
     negative_saturation_events : np.ndarray
         The negative saturation events.
     """
+    # TODO: use preprocessing saturation
     from spikeinterface.core.node_pipeline import run_node_pipeline
-    from spikeinterface.sortingcomponents.peak_detection.locally_exclusive import LocallyExclusivePeakDetector
+    from spikeinterface.sortingcomponents.peak_detection.method_list import LocallyExclusivePeakDetector
 
     channel_distance = si.get_channel_distances(recording)
     neighbours_mask = channel_distance <= radius_um
