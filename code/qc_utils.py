@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+from matplotlib.lines import Line2D
+
 from scipy.signal import welch, savgol_filter
 
 import spikeinterface as si
@@ -103,25 +105,6 @@ def load_preprocessed_recording(preprocessed_json_file, session_name, ecephys_fo
     else:
         logging.info("Preprocessed recording not found...")
     return recording_preprocessed
-
-
-def load_processing_metadata(processing_json):
-    """
-    Loads processing metadata.
-    """
-    with open(processing_json) as f:
-        processing_dict = json.load(f)
-    processing_dict.pop("schema_version")
-    data_processes = processing_dict["processing_pipeline"]["data_processes"]
-    new_data_processes = []
-    for dp in data_processes:
-        if isinstance(dp, list):
-            for dpp in dp:
-                new_data_processes.append(dpp)
-        else:
-            new_data_processes.append(dp)
-    processing_dict["processing_pipeline"]["data_processes"] = new_data_processes
-    return Processing(**processing_dict)
 
 
 def get_recording_relative_path(recording):
@@ -603,8 +586,9 @@ def generate_raw_qc(
 def generate_drift_qc(
     recording: si.BaseRecording,
     recording_name: str,
-    motion_path: Path,
     output_qc_path: Path,
+    motion_path: Path,
+    motion_sorter_path: Path | None = None,
     relative_to: Path | None = None,
 ) -> QCMetric:
     """
@@ -616,10 +600,12 @@ def generate_drift_qc(
         The sorting analyzer.
     recording_name : str
         The name of the recording.
-    motion_path: Path,
-        The path of the recording's motion folder.
     output_qc_path : Path
         The output path for the quality control.
+    motion_path: Path
+        The path of the recording's motion folder.
+    motion_sorter_path: Path | None, default: None
+        The path of the motion folder from the spike sorter.
     processing : Processing | None, default: None
         The processing metadata object.
 
@@ -639,6 +625,12 @@ def generate_drift_qc(
     all_peaks = motion_info["peaks"]
     all_peak_locations = motion_info["peak_locations"]
     motion = motion_info["motion"]
+    motion_params = motion_info["parameters"]
+    motion_preset = motion_params["preset"]
+
+    motion_sorter = None
+    if motion_sorter_path is not None and motion_sorter_path.is_dir():
+        motion_sorter = si.load(motion_sorter_path)
 
     fig_drift, axs_drift = plt.subplots(ncols=recording.get_num_segments(), figsize=(10, 10))
     y_locs = recording.get_channel_locations()[:, 1]
@@ -672,30 +664,43 @@ def generate_drift_qc(
         ax_drift.spines["top"].set_visible(False)
         ax_drift.spines["right"].set_visible(False)
 
-        if motion is not None:
-            displacement_arr = motion.displacement[segment_index]
-            temporal_bins = motion.temporal_bins_s[segment_index]
-            spatial_bins = motion.spatial_bins_um
+        # Add motion from preprocessing
+        displacement_arr = motion.displacement[segment_index]
+        temporal_bins = motion.temporal_bins_s[segment_index]
+        spatial_bins = motion.spatial_bins_um
 
-            # calculate cumulative_drift and max displacement
-            drift_ptps = np.ptp(displacement_arr, axis=0)
-            displacements_diff_arr = np.diff(displacement_arr, axis=0)
-            cumulative_drifts = np.sum(displacements_diff_arr, axis=0)
-            max_displacement_index = np.argmax(drift_ptps)
-            max_displacement = np.round(drift_ptps[max_displacement_index], 2)
-            depth_at_max_displacement = int(spatial_bins[max_displacement_index])
+        # calculate cumulative_drift and max displacement
+        drift_ptps = np.ptp(displacement_arr, axis=0)
+        displacements_diff_arr = np.diff(displacement_arr, axis=0)
+        cumulative_drifts = np.sum(displacements_diff_arr, axis=0)
+        max_displacement_index = np.argmax(drift_ptps)
+        max_displacement = np.round(drift_ptps[max_displacement_index], 2)
+        depth_at_max_displacement = int(spatial_bins[max_displacement_index])
 
-            max_cumulative_drift_index = np.argmax(cumulative_drifts)
-            max_cumulative_drift = np.round(cumulative_drifts[max_cumulative_drift_index], 2)
-            depth_at_max_cumulative_drift = int(spatial_bins[max_cumulative_drift_index])
+        max_cumulative_drift_index = np.argmax(cumulative_drifts)
+        max_cumulative_drift = np.round(cumulative_drifts[max_cumulative_drift_index], 2)
+        depth_at_max_cumulative_drift = int(spatial_bins[max_cumulative_drift_index])
 
-            ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="red", alpha=0.5)
+        ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="red", alpha=0.5)
 
-    if motion is not None:
-        ax_drift.set_title(
-            f"Max displacement: {max_displacement} $\mu m$ (depth: {depth_at_max_displacement} ) $\\mu m$\n"
-            f"Max cumulative drift: {max_cumulative_drift} $\mu m$ (depth: {depth_at_max_cumulative_drift} ) $\\mu m$\n"
-        )
+        legend_lines = [Line2D([0], [0], color='red', lw=1, label=motion_preset)]
+        ax_drift.get_lines()[-1].set_label(motion_preset)
+
+        if motion_sorter is not None:
+            displacement_arr = motion_sorter.displacement[segment_index]
+            temporal_bins = motion_sorter.temporal_bins_s[segment_index]
+            spatial_bins = motion_sorter.spatial_bins_um
+
+            ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="green", alpha=0.5)
+            legend_lines.append(Line2D([0], [0], color='green', lw=1, label='sorter'))
+
+    ax_drift.legend(handles=legend_lines)
+
+    ax_drift.set_title(
+        f"Preset: {motion_preset}\n"
+        f"Max displacement: {max_displacement} $\mu m$ (depth: {depth_at_max_displacement} ) $\\mu m$\n"
+        f"Max cumulative drift: {max_cumulative_drift} $\mu m$ (depth: {depth_at_max_cumulative_drift} ) $\\mu m$\n"
+    )
 
     drift_map_path = recording_fig_folder / "drift_map.png"
     fig_drift.savefig(drift_map_path, dpi=300)
@@ -768,7 +773,10 @@ def generate_event_qc(
 
     metrics = []
     if saturation_threshold_uv is None:
-        logging.info(f"\tSaturation threshold for {recording_name}. Cannot generate saturation metrics.")
+        logging.info(
+            f"\tSaturation threshold for {recording_name} not available. "
+            "Cannot generate saturation metrics."
+        )
     else:
         pos_evts, neg_evts = find_saturation_events(recording, saturation_threshold_uv, **job_kwargs)
 
@@ -1231,52 +1239,55 @@ def generate_units_qc(
     )
     metrics.append(firing_rate_metric)
 
-    logging.info("Generating SORTING CURATION metric")
-    curation_link = "https://ephys.allenneuraldynamics.org/ephys_gui_app?analyzer_path={derived_asset_location}/postprocessed/"
-    curation_link += f"{recording_name}.zarr&recording_path="
     if raw_recording is not None:
-        curation_link += "{raw_asset_location}/"
         # figure out whether ecephys_compressed or ecephys/ecephys_compressed #TODO
         recording_relative_path = get_recording_relative_path(raw_recording)
-        curation_link += recording_relative_path
+        if recording_relative_path is None:
+            curation_link = None
+        else:
+            curation_link = "https://ephys.allenneuraldynamics.org/ephys_gui_app?analyzer_path={derived_asset_location}/postprocessed/"
+            curation_link += f"{recording_name}.zarr&recording_path="
+            curation_link += "{raw_asset_location}/"
+            curation_link += recording_relative_path
 
-    curation_link_url = quote(curation_link)
+    if curation_link is not None:
+        logging.info("Generating SORTING CURATION metric")
+        curation_link_url = quote(curation_link)
+        sorting_curation_metric_description = (
+            "This metric renders the SpikeInterface GUI through the AIND ephys portal. "
+            "You can use the GUI to curate spike sorting results (label, remove, merge, split). "
+            "Use the 'Submit to parent' button to submit the curation data to the QC Portal."
+        )
+        # Create default curation value from curation
+        curation_dict = get_default_curation_value(sorting_analyzer)
+        if curation_dict is not None:
+            curation_value = [curation_dict]
+            curation_history = [
+                CurationHistory(
+                    curator="Ephys pipeline",
+                    timestamp=now,
+                )
+            ]
+        else:
+            logging.info("\tCurated dictionary is invalid.")
+            curation_value = []
+            curation_history = []
 
-    sorting_curation_metric_description = (
-        "This metric renders the SpikeInterface GUI through the AIND ephys portal. "
-        "You can use the GUI to curate spike sorting results (label, remove, merge, split). "
-        "Use the 'Submit to parent' button to submit the curation data to the QC Portal."
-    )
-    # Create default curation value from curation
-    curation_dict = get_default_curation_value(sorting_analyzer)
-    if curation_dict is not None:
-        curation_value = [curation_dict]
-        curation_history = [
-            CurationHistory(
-                curator="Ephys pipeline",
-                timestamp=now,
-            )
-        ]
-    else:
-        logging.info("\tCurated dictionary is invalid.")
-        curation_value = []
-        curation_history = []
-
-    sorting_curation_metric = CurationMetric(
-        name=f"Sorting Curation - {recording_name_abbrv}",
-        type="Spike sorting curation",
-        value=curation_value,
-        curation_history=curation_history,
-        modality=Modality.ECEPHYS,
-        stage=Stage.PROCESSING,
-        description=sorting_curation_metric_description,
-        reference=curation_link_url,
-        status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
-        tags={
-            "probe": recording_name_abbrv
-        }
-    )
-    metrics.append(sorting_curation_metric)
+        sorting_curation_metric = CurationMetric(
+            name=f"Sorting Curation - {recording_name_abbrv}",
+            type="Spike sorting curation",
+            value=curation_value,
+            curation_history=curation_history,
+            modality=Modality.ECEPHYS,
+            stage=Stage.PROCESSING,
+            description=sorting_curation_metric_description,
+            reference=curation_link_url,
+            status_history=[QCStatus(evaluator="", status=Status.PASS, timestamp=now)],
+            tags={
+                "probe": recording_name_abbrv
+            }
+        )
+        metrics.append(sorting_curation_metric)
 
     return metrics
 
@@ -1346,14 +1357,14 @@ def find_saturation_events(
         The negative saturation events.
     """
     from spikeinterface.core.node_pipeline import run_node_pipeline
-    from spikeinterface.sortingcomponents.peak_detection import DetectPeakLocallyExclusive
+    from spikeinterface.sortingcomponents.peak_detection.locally_exclusive import LocallyExclusivePeakDetector
 
     channel_distance = si.get_channel_distances(recording)
     neighbours_mask = channel_distance <= radius_um
     num_channels = recording.get_num_channels()
 
     # here we set absolute thresholds externally, since we know the saturation thresholds
-    saturation_both = DetectPeakLocallyExclusive(recording, noise_levels=np.ones(num_channels))
+    saturation_both = LocallyExclusivePeakDetector(recording, noise_levels=np.ones(num_channels))
     abs_thresholds = np.array([saturation_threshold_uv / recording.get_channel_gains()[0]] * num_channels)
     saturation_both.args = ("both", abs_thresholds, exclude_sweep_ms, neighbours_mask)
 

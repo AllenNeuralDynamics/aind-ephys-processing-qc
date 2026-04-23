@@ -14,8 +14,8 @@ from pathlib import Path
 import spikeinterface as si
 
 # AIND
-from aind_data_schema_models.modalities import Modality
-from aind_data_schema.core.quality_control import QualityControl, Stage
+from aind_data_schema.core.processing import Processing
+from aind_data_schema.core.quality_control import QualityControl
 
 try:
     from aind_log_utils import log
@@ -25,7 +25,6 @@ except ImportError:
 
 from qc_utils import (
     load_preprocessed_recording,
-    load_processing_metadata,
     recording_abbrv_name,
     generate_raw_qc,
     generate_units_qc,
@@ -105,8 +104,8 @@ if __name__ == "__main__":
     logging.info(f"\tCOMPUTE EVENT METRICS: {COMPUTE_EVENT_METRIC}")
     logging.info(f"\tMIN DURATION ALLOW FAILED: {MIN_DURATION_ALLOW_FAILED}")
 
-    # Use CO_CPUS/SLURM_CPUS_ON_NODE env variable if available
-    N_JOBS_EXT = os.getenv("CO_CPUS") or os.getenv("SLURM_CPUS_ON_NODE") or os.getenv("SLURM_CPUS_PER_TASK")
+    # Use CO_CPUS/N_JOBS_EXT env variable if available
+    N_JOBS_EXT = os.getenv("CO_CPUS") or os.getenv("N_JOBS_EXT")
     N_JOBS = int(N_JOBS_EXT) if N_JOBS_EXT is not None else -1
     job_kwargs = dict(n_jobs=N_JOBS, progress_bar=False, mp_context="spawn")
     si.set_global_job_kwargs(**job_kwargs)
@@ -200,7 +199,9 @@ if __name__ == "__main__":
         processing_json_file = ecephys_sorted_folder / "processing.json"
         if processing_json_file.is_file():
             try:
-                processing = load_processing_metadata(processing_json_file)
+                with open(processing_json_file) as f:
+                    processing_data = json.load(f)
+                processing = Processing(**processing_data)
             except:
                 logging.info(f"Failed to load processing.json")
 
@@ -305,6 +306,7 @@ if __name__ == "__main__":
         
         if ecephys_sorted_folder is not None:
             motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
+            motion_sorter_path = ecephys_sorted_folder / "spikesorted" / "motion" / recording_name
 
             # open displacement arrays
             if not motion_path.is_dir():
@@ -313,8 +315,9 @@ if __name__ == "__main__":
                 metrics_drift = generate_drift_qc(
                     recording,
                     recording_name,
-                    motion_path,
-                    quality_control_fig_folder,
+                    output_qc_path=quality_control_fig_folder,
+                    motion_path=motion_path,
+                    motion_sorter_path=motion_sorter_path,
                     relative_to=results_folder,
                 )
                 all_metrics.extend(metrics_drift)
