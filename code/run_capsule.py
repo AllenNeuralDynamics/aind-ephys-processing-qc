@@ -52,6 +52,13 @@ min_duration_allow_failed_group.add_argument("static_min_duration_allow_failed",
 min_duration_allow_failed_group.add_argument("--min-duration-allow-failed", default=None, help=min_duration_allow_failed_help)
 
 
+parser.add_argument(
+    "--pipeline-data-path",
+    default=None,
+    help="Path to the data folder containing the ecephys session.",
+)
+
+
 if __name__ == "__main__":
     t_qc_start_all = time.perf_counter()
 
@@ -64,6 +71,7 @@ if __name__ == "__main__":
     if MIN_DURATION_ALLOW_FAILED is None:
         MIN_DURATION_ALLOW_FAILED = 0
     MIN_DURATION_ALLOW_FAILED = float(MIN_DURATION_ALLOW_FAILED)
+    pipeline_data_path = args.pipeline_data_path
 
     # pipeline mode VS capsule mode
     ecephys_folders = [
@@ -260,8 +268,9 @@ if __name__ == "__main__":
         if ecephys_sorted_folder is not None:
             sorting_analyzer = None
             preprocessed_json_file = ecephys_sorted_folder / "preprocessed" / f"{recording_name}.json"
+            base_folder = data_folder if pipeline_data_path is None else pipeline_data_path
             recording_preprocessed = load_preprocessed_recording(
-                preprocessed_json_file, session_name, ecephys_folder, data_folder
+                preprocessed_json_file, session_name, ecephys_folder, base_folder
             )
             if recording_preprocessed is not None and skip_times:
                 recording_preprocessed.reset_times()
