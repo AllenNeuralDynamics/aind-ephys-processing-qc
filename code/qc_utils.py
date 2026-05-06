@@ -428,14 +428,12 @@ def generate_raw_qc(
     channel_labels = None
     if processing is not None:
         try:
-            data_processes = processing.processing_pipeline.data_processes
+            data_processes = processing.data_processes
             for data_process in data_processes:
-                params = data_process.parameters.model_dump()
-                outputs = data_process.outputs.model_dump()
+                outputs = data_process.output_parameters.model_dump()
                 if (
-                    data_process.name == "Ephys preprocessing"
-                    and params.get("recording_name") is not None
-                    and params.get("recording_name") == recording_name
+                    "Ephys preprocessing" in data_process.name and
+                    recording_name in data_process.name
                 ):
                     channel_labels = np.array(outputs.get("channel_labels"))
         except:
@@ -1079,7 +1077,7 @@ def generate_units_qc(
         smoothed_amplitude = savgol_filter(mean_amplitude_by_depth["amplitude"], 10, 2)
         ax_amplitudes.plot(smoothed_amplitude, mean_amplitude_by_depth.index.tolist(), c="r")
     except Exception:
-        logging.info("Smooting amplitudes failed.")
+        logging.info("Smoothing amplitudes failed.")
     ax_amplitudes.set_title("Unit Amplitude By Depth")
     ax_amplitudes.set_xlabel("Amplitude ($\\mu V$)")
     ax_amplitudes.set_ylabel("Depth ($\\mu m$)")
@@ -1103,7 +1101,7 @@ def generate_units_qc(
         smoothed_firing_rate = savgol_filter(mean_firing_rate_by_depth["firing_rate"], 10, 2)
         ax_fr.plot(smoothed_firing_rate, mean_firing_rate_by_depth.index.tolist(), c="r")
     except Exception:
-        logging.info("Smooting firing rates failed.")
+        logging.info("Smoothing firing rates failed.")
     ax_fr.set_title("Unit Firing Rate By Depth")
     ax_fr.set_xlabel("Firing rate (Hz)")
     ax_fr.set_ylabel("Depth ($\\mu m$)")
