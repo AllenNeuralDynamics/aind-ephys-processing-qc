@@ -1362,13 +1362,17 @@ def find_saturation_events(
     num_channels = recording.get_num_channels()
 
     # here we set absolute thresholds externally, since we know the saturation thresholds
-    saturation_both = LocallyExclusivePeakDetector(recording, noise_levels=np.ones(num_channels))
-    abs_thresholds = np.array([saturation_threshold_uv / recording.get_channel_gains()[0]] * num_channels)
-    saturation_both.args = ("both", abs_thresholds, exclude_sweep_ms, neighbours_mask)
+    saturation_both = LocallyExclusivePeakDetector(
+        recording, noise_levels=np.ones(num_channels), peak_sign="both", exclude_sweep_ms=exclude_sweep_ms
+    )
+    gain = recording.get_channel_gains()[0]
+    abs_thresholds = np.array([saturation_threshold_uv / gain] * num_channels)
+    saturation_both.abs_thresholds = abs_thresholds
 
     job_name = f"finding saturation events"
     squeeze_output = True
     nodes = [saturation_both]
+
     outs = run_node_pipeline(
         recording,
         nodes,
