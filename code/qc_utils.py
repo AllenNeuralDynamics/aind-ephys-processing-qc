@@ -1369,7 +1369,7 @@ def find_saturation_events(
     abs_thresholds = np.array([saturation_threshold_uv / gain] * num_channels)
     saturation_both.abs_thresholds = abs_thresholds
 
-    job_name = f"finding positive saturation events"
+    job_name = f"finding saturation events"
     squeeze_output = True
     nodes = [saturation_both]
 
