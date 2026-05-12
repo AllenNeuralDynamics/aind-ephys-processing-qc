@@ -282,7 +282,6 @@ if __name__ == "__main__":
             elif postprocessed_folder.is_dir():
                 # this is for legacy waveform extractor folders
                 sorting_analyzer = si.load_waveforms(postprocessed_folder, output="SortingAnalyzer")
-
             if recording_preprocessed is not None and sorting_analyzer is not None:
                 sorting_analyzer.set_temporary_recording(recording_preprocessed)
 
@@ -333,7 +332,7 @@ if __name__ == "__main__":
         
         if ecephys_sorted_folder is not None:
             # generate unit metrics rely on quality/template metrics computed in postprocessing
-            if sorting_analyzer.has_extension("quality_metrics") and sorting_analyzer.has_extension("template_metrics"):
+            if sorting_analyzer is not None and sorting_analyzer.has_extension("quality_metrics") and sorting_analyzer.has_extension("template_metrics"):
                 metrics_units = generate_units_qc(
                     sorting_analyzer,
                     recording_name,

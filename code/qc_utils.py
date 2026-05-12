@@ -997,9 +997,6 @@ def generate_units_qc(
     recording_name_abbrv = recording_abbrv_name(recording_name)
 
     logging.info("Generating UNIT YIELD metric")
-    if sorting_analyzer is None:
-        logging.info(f"\tNo sorting analyzer found for {recording_name}")
-        return metrics
 
     number_of_units = sorting_analyzer.get_num_units()
 
