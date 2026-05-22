@@ -381,14 +381,12 @@ def generate_raw_qc(
     channel_labels = None
     if processing is not None:
         try:
-            data_processes = processing.processing_pipeline.data_processes
+            data_processes = processing.data_processes
             for data_process in data_processes:
-                params = data_process.parameters.model_dump()
-                outputs = data_process.outputs.model_dump()
+                outputs = data_process.output_parameters.model_dump()
                 if (
-                    data_process.name == "Ephys preprocessing"
-                    and params.get("recording_name") is not None
-                    and params.get("recording_name") == recording_name
+                    "Ephys preprocessing" in data_process.name and
+                    recording_name in data_process.name
                 ):
                     channel_labels = np.array(outputs.get("channel_labels"))
         except:
@@ -915,9 +913,32 @@ def generate_unit_yield_qc(
     max_firing_rate_for_visualization: float = 50,
 ) -> list[QCMetric]:
     """
-    Generate unit yield metric: quality/template metric distributions + amplitude and
-    firing rate profiles by depth.
-    """
+    Generate unit yield metrics for a given sorting result.
+
+    Parameters
+    ----------
+    sorting_analyzer : SortingAnalyzer
+        The sorting analyzer.
+    recording_name : str
+        The name of the recording.
+    output_qc_path : Path
+        The output path for the quality control.
+    relative_to : Path | None, default: None
+        The relative path to the output path.
+    visualization_output : dict | None, default: None
+        The visualization output dict.
+    curation_json_file : Path | None, default: None
+        The path to the curation json file containing manual labels for units.
+    max_amplitude_for_visualization : float, default: 5000
+        The maximum amplitude used for plotting.
+    max_firing_rate_for_visualization : float, default: 50
+        The maximum firing rate used for plotting.
+
+    Returns
+    -------
+    metrics : list[QCMetric]:
+        The quality control metrics.
+    """    
     metrics = []
     recording_fig_folder = output_qc_path
     recording_fig_folder.mkdir(exist_ok=True, parents=True)
@@ -926,9 +947,6 @@ def generate_unit_yield_qc(
     recording_name_abbrv = recording_abbrv_name(recording_name)
 
     logging.info("Generating UNIT YIELD metric")
-    if sorting_analyzer is None:
-        logging.info(f"\tNo sorting analyzer found for {recording_name}")
-        return metrics
 
     # Build binary neural/noise labels for scatter coloring.
     curation_noise_ids = set()
@@ -1028,7 +1046,7 @@ def generate_unit_yield_qc(
         smoothed_amplitude = savgol_filter(mean_amplitude_by_depth["amplitude"], 10, 2)
         ax_amplitudes.plot(smoothed_amplitude, mean_amplitude_by_depth.index.tolist(), c="k", lw=1.5)
     except Exception:
-        logging.info("Smooting amplitudes failed.")
+        logging.info("Smoothing amplitudes failed.")
     ax_amplitudes.set_title("Unit Amplitude By Depth")
     ax_amplitudes.set_xlabel("Amplitude ($\\mu V$)")
     ax_amplitudes.set_ylabel("Depth ($\\mu m$)")
@@ -1065,7 +1083,7 @@ def generate_unit_yield_qc(
         smoothed_firing_rate = savgol_filter(mean_firing_rate_by_depth["firing_rate"], 10, 2)
         ax_fr.plot(smoothed_firing_rate, mean_firing_rate_by_depth.index.tolist(), c="k", lw=1.5)
     except Exception:
-        logging.info("Smooting firing rates failed.")
+        logging.info("Smoothing firing rates failed.")
     ax_fr.set_title("Unit Firing Rate By Depth")
     ax_fr.set_xlabel("Firing rate (Hz)")
     ax_fr.set_ylabel("Depth ($\\mu m$)")
@@ -1512,13 +1530,17 @@ def find_saturation_events(
     num_channels = recording.get_num_channels()
 
     # here we set absolute thresholds externally, since we know the saturation thresholds
-    saturation_both = LocallyExclusivePeakDetector(recording, noise_levels=np.ones(num_channels))
-    abs_thresholds = np.array([saturation_threshold_uv / recording.get_channel_gains()[0]] * num_channels)
-    saturation_both.args = ("both", abs_thresholds, exclude_sweep_ms, neighbours_mask)
+    saturation_both = LocallyExclusivePeakDetector(
+        recording, noise_levels=np.ones(num_channels), peak_sign="both", exclude_sweep_ms=exclude_sweep_ms
+    )
+    gain = recording.get_channel_gains()[0]
+    abs_thresholds = np.array([saturation_threshold_uv / gain] * num_channels)
+    saturation_both.abs_thresholds = abs_thresholds
 
     job_name = f"finding saturation events"
     squeeze_output = True
     nodes = [saturation_both]
+
     outs = run_node_pipeline(
         recording,
         nodes,
