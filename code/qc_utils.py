@@ -1390,6 +1390,9 @@ def generate_curation_qc(
         )
         metrics.append(auto_curation_metric)
 
+    logging.info("Generating SORTING CURATION metric")
+    curation_link = "https://ephys.allenneuraldynamics.org/ephys_gui_app?analyzer_path={derived_asset_location}/postprocessed/"
+    curation_link += f"{recording_name}.zarr&recording_path="
     if raw_recording is not None:
         curation_link += "{raw_asset_location}/"
         # figure out whether ecephys_compressed or ecephys/ecephys_compressed #TODO
