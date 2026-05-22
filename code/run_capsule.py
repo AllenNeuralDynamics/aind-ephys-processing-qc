@@ -338,7 +338,7 @@ if __name__ == "__main__":
                 curation_json_file = ecephys_sorted_folder / "curated" / recording_name / "curation.json"
                 if not curation_json_file.is_file():
                     curation_json_file = None
-                unit_metrics = generate_units_qc(
+                unit_metrics = generate_unit_yield_qc(
                     sorting_analyzer,
                     recording_name,
                     quality_control_fig_folder,
