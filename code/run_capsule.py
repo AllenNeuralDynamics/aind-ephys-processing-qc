@@ -14,8 +14,8 @@ from pathlib import Path
 import spikeinterface as si
 
 # AIND
-from aind_data_schema_models.modalities import Modality
-from aind_data_schema.core.quality_control import QualityControl, Stage
+from aind_data_schema.core.processing import Processing
+from aind_data_schema.core.quality_control import QualityControl
 
 try:
     from aind_log_utils import log
@@ -25,7 +25,6 @@ except ImportError:
 
 from qc_utils import (
     load_preprocessed_recording,
-    load_processing_metadata,
     recording_abbrv_name,
     generate_raw_qc,
     generate_unit_yield_qc,
@@ -55,6 +54,13 @@ min_duration_allow_failed_group.add_argument("static_min_duration_allow_failed",
 min_duration_allow_failed_group.add_argument("--min-duration-allow-failed", default=None, help=min_duration_allow_failed_help)
 
 
+parser.add_argument(
+    "--pipeline-data-path",
+    default=None,
+    help="Path to the data folder containing the ecephys session.",
+)
+
+
 if __name__ == "__main__":
     t_qc_start_all = time.perf_counter()
 
@@ -67,6 +73,7 @@ if __name__ == "__main__":
     if MIN_DURATION_ALLOW_FAILED is None:
         MIN_DURATION_ALLOW_FAILED = 0
     MIN_DURATION_ALLOW_FAILED = float(MIN_DURATION_ALLOW_FAILED)
+    pipeline_data_path = args.pipeline_data_path
 
     # pipeline mode VS capsule mode
     ecephys_folders = [
@@ -107,8 +114,8 @@ if __name__ == "__main__":
     logging.info(f"\tCOMPUTE EVENT METRICS: {COMPUTE_EVENT_METRIC}")
     logging.info(f"\tMIN DURATION ALLOW FAILED: {MIN_DURATION_ALLOW_FAILED}")
 
-    # Use CO_CPUS/SLURM_CPUS_ON_NODE env variable if available
-    N_JOBS_EXT = os.getenv("CO_CPUS") or os.getenv("SLURM_CPUS_ON_NODE") or os.getenv("SLURM_CPUS_PER_TASK")
+    # Use CO_CPUS/N_JOBS_EXT env variable if available
+    N_JOBS_EXT = os.getenv("CO_CPUS") or os.getenv("N_JOBS_EXT")
     N_JOBS = int(N_JOBS_EXT) if N_JOBS_EXT is not None else -1
     job_kwargs = dict(n_jobs=N_JOBS, progress_bar=False, mp_context="spawn")
     si.set_global_job_kwargs(**job_kwargs)
@@ -202,7 +209,9 @@ if __name__ == "__main__":
         processing_json_file = ecephys_sorted_folder / "processing.json"
         if processing_json_file.is_file():
             try:
-                processing = load_processing_metadata(processing_json_file)
+                with open(processing_json_file) as f:
+                    processing_data = json.load(f)
+                processing = Processing(**processing_data)
             except:
                 logging.info(f"Failed to load processing.json")
 
@@ -261,8 +270,9 @@ if __name__ == "__main__":
         if ecephys_sorted_folder is not None:
             sorting_analyzer = None
             preprocessed_json_file = ecephys_sorted_folder / "preprocessed" / f"{recording_name}.json"
+            base_folder = data_folder if pipeline_data_path is None else pipeline_data_path
             recording_preprocessed = load_preprocessed_recording(
-                preprocessed_json_file, session_name, ecephys_folder, data_folder
+                preprocessed_json_file, session_name, ecephys_folder, base_folder
             )
             if recording_preprocessed is not None and skip_times:
                 recording_preprocessed.reset_times()
@@ -274,7 +284,6 @@ if __name__ == "__main__":
             elif postprocessed_folder.is_dir():
                 # this is for legacy waveform extractor folders
                 sorting_analyzer = si.load_waveforms(postprocessed_folder, output="SortingAnalyzer")
-
             if recording_preprocessed is not None and sorting_analyzer is not None:
                 sorting_analyzer.set_temporary_recording(recording_preprocessed)
 
@@ -307,6 +316,7 @@ if __name__ == "__main__":
         
         if ecephys_sorted_folder is not None:
             motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
+            motion_sorter_path = ecephys_sorted_folder / "spikesorted" / "motion" / recording_name
 
             # open displacement arrays
             if not motion_path.is_dir():
@@ -315,38 +325,46 @@ if __name__ == "__main__":
                 metrics_drift = generate_drift_qc(
                     recording,
                     recording_name,
-                    motion_path,
-                    quality_control_fig_folder,
+                    output_qc_path=quality_control_fig_folder,
+                    motion_path=motion_path,
+                    motion_sorter_path=motion_sorter_path,
                     relative_to=results_folder,
                 )
                 all_metrics.extend(metrics_drift)
         
         if ecephys_sorted_folder is not None:
-            curation_json_file = ecephys_sorted_folder / "curated" / recording_name / "curation.json"
-            if not curation_json_file.is_file():
-                curation_json_file = None
-            all_metrics.extend(generate_unit_yield_qc(
-                sorting_analyzer,
-                recording_name,
-                quality_control_fig_folder,
-                relative_to=results_folder,
-                visualization_output=visualization_output,
-                curation_json_file=curation_json_file,
-            ))
-            all_metrics.extend(generate_firing_rate_qc(
-                sorting_analyzer,
-                recording_name,
-                quality_control_fig_folder,
-                relative_to=results_folder,
-            ))
-            all_metrics.extend(generate_curation_qc(
-                sorting_analyzer,
-                recording_name,
-                quality_control_fig_folder,
-                relative_to=results_folder,
-                raw_recording=recording,
-                curation_json_file=curation_json_file,
-            ))
+            if sorting_analyzer is not None and sorting_analyzer.has_extension("quality_metrics") \
+                and sorting_analyzer.has_extension("template_metrics"):
+                curation_json_file = ecephys_sorted_folder / "curated" / recording_name / "curation.json"
+                if not curation_json_file.is_file():
+                    curation_json_file = None
+                unit_metrics = generate_units_qc(
+                    sorting_analyzer,
+                    recording_name,
+                    quality_control_fig_folder,
+                    relative_to=results_folder,
+                    visualization_output=visualization_output,
+                    curation_json_file=curation_json_file,
+                )
+                firing_rate_metrics = generate_firing_rate_qc(
+                    sorting_analyzer,
+                    recording_name,
+                    quality_control_fig_folder,
+                    relative_to=results_folder,
+                )
+                curation_metrics = generate_curation_qc(
+                    sorting_analyzer,
+                    recording_name,
+                    quality_control_fig_folder,
+                    relative_to=results_folder,
+                    raw_recording=recording,
+                    curation_json_file=curation_json_file,
+                )
+                all_metrics.extend(unit_metrics)
+                all_metrics.extend(firing_rate_metrics)
+                all_metrics.extend(curation_metrics)
+            else:
+                logging.info(f"\tQuality/Template metrics not found for {recording_name}. Skipping unit metrics.")
 
         # If recording is too short, allow tagged metrics to fail
         if recording.get_total_duration() < MIN_DURATION_ALLOW_FAILED:
