@@ -154,8 +154,7 @@ def plot_raw_data(
 
     recording_hp = spre.highpass_filter(recording, freq_min=freq_ap)
     if recording_lfp is None:
-        recording_lfp = spre.bandpass_filter(recording, freq_min=0.1, freq_max=freq_lfp)
-    
+        recording_lfp = spre.bandpass_filter(recording, freq_min=0.1, freq_max=freq_lfp, ignore_low_freq_error=True)
     surface_channel_y_position = _get_surface_channel(recording, channel_labels)
 
     for segment_index in range(num_segments):
