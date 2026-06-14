@@ -3,7 +3,6 @@
 import os
 import sys
 import argparse
-import shutil
 import json
 import numpy as np
 import time
@@ -12,6 +11,7 @@ from pathlib import Path
 
 
 import spikeinterface as si
+import spikeinterface.preprocessing as spre
 
 # AIND
 from aind_data_schema.core.processing import Processing
@@ -142,67 +142,8 @@ if __name__ == "__main__":
         job_dicts.append(job_dict)
     logging.info(f"Found {len(job_dicts)} JSON job files")
 
-    if len(job_dicts) == 0:
-        logging.info("Parsing AIND-specific input data")
-        # here we load the compressed recordings
-        if (ecephys_folder / "ecephys").is_dir():
-            ecephys_compressed_folder = ecephys_folder / "ecephys" / "ecephys_compressed"
-        else:
-            ecephys_compressed_folder = ecephys_folder / "ecephys_compressed"
-        for stream_folder in ecephys_compressed_folder.iterdir():
-            stream_name = stream_folder.name
-            if "LFP" in stream_name or "NI-DAQ" in stream_name:
-                continue
-            job_dict = {}
-            job_dict["session_name"] = ecephys_folder.name
-            recording_base_name = stream_name[: stream_name.find(".zarr")]
-            recording = si.read_zarr(stream_folder)
-            recording_lfp = None
-
-            if "AP" in stream_name:
-                lfp_stream_path = Path(str(stream_folder).replace("AP", "LFP"))
-                if lfp_stream_path.is_dir():
-                    recording_lfp = si.read_zarr(lfp_stream_path)
-            for segment_index in range(recording.get_num_segments()):
-                recording_one = si.split_recording(recording)[segment_index]
-                if recording_lfp is not None:
-                    recording_lfp_one = si.split_recording(recording_lfp)[segment_index]
-                recording_name = f"{recording_base_name}_recording{segment_index+1}"
-                # timestamps should be monotonically increasing, but we allow for small glitches
-                skip_times = False
-                for segment_index in range(recording.get_num_segments()):
-                    times = recording.get_times(segment_index=segment_index)
-                    times_diff = np.diff(times)
-                    num_negative_times = np.sum(times_diff < 0)
-
-                    if num_negative_times > 0:
-                        logging.info(f"\t{recording_name} - Times not monotonically increasing.")
-                        skip_times = True
-                job_dict["skip_times"] = skip_times
-
-                if len(np.unique(recording_one.get_channel_groups())) > 1:
-                    for group, recording_group in recording_one.split_by("group").items():
-                        job_dict["recording_name"] = f"{recording_base_name}_recording{segment_index+1}_group{group}"
-                        job_dict["recording_dict"] = recording_group.to_dict(recursive=True, relative_to=data_folder)
-                        if recording_lfp is not None:
-                            recording_lfp_group = recording_lfp_one.split_by("group")[group]
-                            job_dict["recording_lfp_dict"] = recording_lfp_group.to_dict(
-                                recursive=True, relative_to=data_folder
-                            )
-                        job_dicts.append(job_dict)
-                else:
-                    job_dict["recording_name"] = f"{recording_base_name}_recording{segment_index+1}"
-                    job_dict["recording_dict"] = recording_one.to_dict(recursive=True, relative_to=data_folder)
-                    if recording_lfp is not None:
-                        job_dict["recording_lfp_dict"] = recording_lfp_one.to_dict(
-                            recursive=True, relative_to=data_folder
-                        )
-                    job_dicts.append(job_dict)
-        logging.info(f"Found {len(job_dicts)} recordings")
-
     processing = None
     visualization_output = None
-
     if ecephys_sorted_folder is not None:
         processing_json_file = ecephys_sorted_folder / "processing.json"
         if processing_json_file.is_file():
@@ -219,7 +160,6 @@ if __name__ == "__main__":
                 visualization_output = json.load(f)
 
     event_dict = None
-
     if ecephys_folder is not None:
         harp_folder = [p for p in (ecephys_folder / "behavior").glob("**/raw.harp")]
         if len(harp_folder) == 1:
@@ -255,11 +195,23 @@ if __name__ == "__main__":
         if skip_times:
             logging.info(f"Resetting times for {recording_name}")
             recording.reset_times()
+        if recording.get_dtype().kind == "u":
+            logging.info(
+                f"Recording has unsigned integer dtype {recording.get_dtype()}. "
+                "Converting to signed integer."
+            )
+            recording = spre.unsigned_to_signed(recording)
         recording_lfp_dict = job_dict.get("recording_lfp_dict")
         if recording_lfp_dict is not None:
             recording_lfp = si.load(recording_lfp_dict, base_folder=data_folder)
             if skip_times:
                 recording_lfp.reset_times()
+            if recording_lfp.get_dtype().kind == "u":
+                logging.info(
+                    f"Recording LFP has unsigned integer dtype {recording_lfp.get_dtype()}. "
+                    "Converting to signed integer."
+                )
+                recording_lfp = spre.unsigned_to_signed(recording_lfp)
         else:
             recording_lfp = None
         session_name = job_dict["session_name"]
