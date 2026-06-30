@@ -27,7 +27,9 @@ from qc_utils import (
     load_preprocessed_recording,
     recording_abbrv_name,
     generate_raw_qc,
-    generate_units_qc,
+    generate_unit_yield_qc,
+    generate_firing_rate_qc,
+    generate_curation_qc,
     generate_drift_qc,
     generate_event_qc,
 )
@@ -283,17 +285,36 @@ if __name__ == "__main__":
                 all_metrics.extend(metrics_drift)
         
         if ecephys_sorted_folder is not None:
-            # generate unit metrics rely on quality/template metrics computed in postprocessing
-            if sorting_analyzer is not None and sorting_analyzer.has_extension("quality_metrics") and sorting_analyzer.has_extension("template_metrics"):
-                metrics_units = generate_units_qc(
+            if sorting_analyzer is not None and sorting_analyzer.has_extension("quality_metrics") \
+                and sorting_analyzer.has_extension("template_metrics"):
+                curation_json_file = ecephys_sorted_folder / "curated" / recording_name / "curation.json"
+                if not curation_json_file.is_file():
+                    curation_json_file = None
+                unit_metrics = generate_unit_yield_qc(
                     sorting_analyzer,
                     recording_name,
                     quality_control_fig_folder,
                     relative_to=results_folder,
                     visualization_output=visualization_output,
-                    raw_recording=recording,
+                    curation_json_file=curation_json_file,
                 )
-                all_metrics.extend(metrics_units)
+                firing_rate_metrics = generate_firing_rate_qc(
+                    sorting_analyzer,
+                    recording_name,
+                    quality_control_fig_folder,
+                    relative_to=results_folder,
+                )
+                curation_metrics = generate_curation_qc(
+                    sorting_analyzer,
+                    recording_name,
+                    quality_control_fig_folder,
+                    relative_to=results_folder,
+                    raw_recording=recording,
+                    curation_json_file=curation_json_file,
+                )
+                all_metrics.extend(unit_metrics)
+                all_metrics.extend(firing_rate_metrics)
+                all_metrics.extend(curation_metrics)
             else:
                 logging.info(f"\tQuality/Template metrics not found for {recording_name}. Skipping unit metrics.")
 
