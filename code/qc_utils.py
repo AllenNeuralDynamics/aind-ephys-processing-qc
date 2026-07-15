@@ -619,6 +619,9 @@ def generate_drift_qc(
         displacement_arr = motion.displacement[segment_index]
         temporal_bins = motion.temporal_bins_s[segment_index]
         spatial_bins = motion.spatial_bins_um
+        # Note: drift_raster_map start at 0, so we need to remove t_start from temporal_bins
+        temporal_bin_size = temporal_bins[1] - temporal_bins[0]
+        temporal_bins = temporal_bins - temporal_bins[0] + temporal_bin_size / 2
 
         # calculate cumulative_drift and max displacement
         drift_ptps = np.ptp(displacement_arr, axis=0)
@@ -641,6 +644,9 @@ def generate_drift_qc(
             displacement_arr = motion_sorter.displacement[segment_index]
             temporal_bins = motion_sorter.temporal_bins_s[segment_index]
             spatial_bins = motion_sorter.spatial_bins_um
+            # Note: drift_raster_map start at 0, so we need to remove t_start from temporal_bins
+            temporal_bin_size = temporal_bins[1] - temporal_bins[0]
+            temporal_bins = temporal_bins - temporal_bins[0] + temporal_bin_size / 2
 
             ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="green", alpha=0.5)
             legend_lines.append(Line2D([0], [0], color='green', lw=1, label='sorter'))
