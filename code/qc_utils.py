@@ -604,7 +604,7 @@ def generate_drift_qc(
             peak_locations=peak_locations_to_plot,
             recording=recording,
             sampling_frequency=sampling_frequency,
-            segment_index=segment_index,
+            segment_indices=[segment_index],
             depth_lim=depth_lim,
             clim=(-200, 0),
             cmap="Greys_r",
