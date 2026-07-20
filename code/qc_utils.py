@@ -584,7 +584,7 @@ def generate_drift_qc(
         motion_sorter = si.load(motion_sorter_path)
 
     # Note: motion is only single-segment, so we add vertical lines in case of multi-segment recordings
-    fig_drift, ax_drift = plt.subplots(ncols=recording.get_num_segments(), figsize=(10, 10))
+    fig_drift, ax_drift = plt.subplots(ncols=1, figsize=(10, 10))
     y_locs = recording.get_channel_locations()[:, 1]
     sampling_frequency = recording.sampling_frequency
     depth_lim = [np.min(y_locs), np.max(y_locs)]
