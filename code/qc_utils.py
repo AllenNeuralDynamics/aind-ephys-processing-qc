@@ -583,73 +583,80 @@ def generate_drift_qc(
     if motion_sorter_path is not None and motion_sorter_path.is_dir():
         motion_sorter = si.load(motion_sorter_path)
 
-    fig_drift, axs_drift = plt.subplots(ncols=recording.get_num_segments(), figsize=(10, 10))
+    # Note: motion is only single-segment, so we add vertical lines in case of multi-segment recordings
+    fig_drift, ax_drift = plt.subplots(ncols=recording.get_num_segments(), figsize=(10, 10))
     y_locs = recording.get_channel_locations()[:, 1]
     sampling_frequency = recording.sampling_frequency
     depth_lim = [np.min(y_locs), np.max(y_locs)]
 
-    for segment_index in range(recording.get_num_segments()):
-        if recording.get_num_segments() == 1:
-            ax_drift = axs_drift
-        else:
-            ax_drift = axs_drift[segment_index]
+    vertical_lines = []
+    if recording.get_num_segments() > 1:
+        vertical_lines  = np.cumsum([recording.get_num_samples(segment_index=i) for i in range(recording.get_num_segments() - 1)]) / sampling_frequency
 
-        segment_mask = all_peaks["segment_index"] == segment_index
-        peaks_to_plot = all_peaks[segment_mask]
-        peak_locations_to_plot = all_peak_locations[segment_mask]
-
-        _ = sw.plot_drift_raster_map(
-            sorting_analyzer=None,
-            peaks=peaks_to_plot,
-            peak_locations=peak_locations_to_plot,
-            recording=recording,
-            sampling_frequency=sampling_frequency,
-            segment_indices=[segment_index],
-            depth_lim=depth_lim,
-            clim=(-200, 0),
-            cmap="Greys_r",
-            scatter_decimate=10,
-            alpha=0.3,
-            ax=ax_drift,
+    unique_segment_indices = np.unique(all_peaks["segment_index"])
+    if len(unique_segment_indices) > 1:
+        warning_msg = (
+            f"Motion peaks are detected in multiple segments: {unique_segment_indices}. "
+            "This is unexpected, as motion estimation is typically performed on a single segment. "
+            "Please check the motion estimation process and ensure that it is applied to the correct segment."
         )
-        ax_drift.spines["top"].set_visible(False)
-        ax_drift.spines["right"].set_visible(False)
+        logging.warning(warning_msg)
 
-        # Add motion from preprocessing
-        displacement_arr = motion.displacement[segment_index]
-        temporal_bins = motion.temporal_bins_s[segment_index]
-        spatial_bins = motion.spatial_bins_um
+    _ = sw.plot_drift_raster_map(
+        sorting_analyzer=None,
+        peaks=all_peaks,
+        peak_locations=all_peak_locations,
+        recording=recording,
+        sampling_frequency=sampling_frequency,
+        segment_indices=[0],
+        depth_lim=depth_lim,
+        clim=(-200, 0),
+        cmap="Greys_r",
+        scatter_decimate=10,
+        alpha=0.3,
+        ax=ax_drift,
+    )
+    ax_drift.spines["top"].set_visible(False)
+    ax_drift.spines["right"].set_visible(False)
+
+    if len(vertical_lines) > 0:
+        ax_drift.axvline(x=vertical_lines[0], color="k", linestyle="--", alpha=0.5)
+
+    # Add motion from preprocessing
+    displacement_arr = motion.displacement[0]
+    temporal_bins = motion.temporal_bins_s[0]
+    spatial_bins = motion.spatial_bins_um
+    # Note: drift_raster_map start at 0, so we need to remove t_start from temporal_bins
+    temporal_bin_size = temporal_bins[1] - temporal_bins[0]
+    temporal_bins = temporal_bins - temporal_bins[0] + temporal_bin_size / 2
+
+    # calculate cumulative_drift and max displacement
+    drift_ptps = np.ptp(displacement_arr, axis=0)
+    displacements_diff_arr = np.diff(displacement_arr, axis=0)
+    cumulative_drifts = np.sum(displacements_diff_arr, axis=0)
+    max_displacement_index = np.argmax(drift_ptps)
+    max_displacement = np.round(drift_ptps[max_displacement_index], 2)
+    depth_at_max_displacement = int(spatial_bins[max_displacement_index])
+
+    max_cumulative_drift_index = np.argmax(cumulative_drifts)
+    max_cumulative_drift = np.round(cumulative_drifts[max_cumulative_drift_index], 2)
+    depth_at_max_cumulative_drift = int(spatial_bins[max_cumulative_drift_index])
+
+    ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="red", alpha=0.5)
+
+    legend_lines = [Line2D([0], [0], color='red', lw=1, label=motion_preset)]
+    ax_drift.get_lines()[-1].set_label(motion_preset)
+
+    if motion_sorter is not None:
+        displacement_arr = motion_sorter.displacement[0]
+        temporal_bins = motion_sorter.temporal_bins_s[0]
+        spatial_bins = motion_sorter.spatial_bins_um
         # Note: drift_raster_map start at 0, so we need to remove t_start from temporal_bins
         temporal_bin_size = temporal_bins[1] - temporal_bins[0]
         temporal_bins = temporal_bins - temporal_bins[0] + temporal_bin_size / 2
 
-        # calculate cumulative_drift and max displacement
-        drift_ptps = np.ptp(displacement_arr, axis=0)
-        displacements_diff_arr = np.diff(displacement_arr, axis=0)
-        cumulative_drifts = np.sum(displacements_diff_arr, axis=0)
-        max_displacement_index = np.argmax(drift_ptps)
-        max_displacement = np.round(drift_ptps[max_displacement_index], 2)
-        depth_at_max_displacement = int(spatial_bins[max_displacement_index])
-
-        max_cumulative_drift_index = np.argmax(cumulative_drifts)
-        max_cumulative_drift = np.round(cumulative_drifts[max_cumulative_drift_index], 2)
-        depth_at_max_cumulative_drift = int(spatial_bins[max_cumulative_drift_index])
-
-        ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="red", alpha=0.5)
-
-        legend_lines = [Line2D([0], [0], color='red', lw=1, label=motion_preset)]
-        ax_drift.get_lines()[-1].set_label(motion_preset)
-
-        if motion_sorter is not None:
-            displacement_arr = motion_sorter.displacement[segment_index]
-            temporal_bins = motion_sorter.temporal_bins_s[segment_index]
-            spatial_bins = motion_sorter.spatial_bins_um
-            # Note: drift_raster_map start at 0, so we need to remove t_start from temporal_bins
-            temporal_bin_size = temporal_bins[1] - temporal_bins[0]
-            temporal_bins = temporal_bins - temporal_bins[0] + temporal_bin_size / 2
-
-            ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="green", alpha=0.5)
-            legend_lines.append(Line2D([0], [0], color='green', lw=1, label='sorter'))
+        ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="green", alpha=0.5)
+        legend_lines.append(Line2D([0], [0], color='green', lw=1, label='sorter'))
 
     ax_drift.legend(handles=legend_lines)
 
