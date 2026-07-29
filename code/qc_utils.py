@@ -159,8 +159,9 @@ def plot_raw_data(
 
     for segment_index in range(num_segments):
         # evenly distribute t_starts across segments
-        times = recording.get_times(segment_index=segment_index)
-        t_starts = np.round(np.linspace(times[0], times[-1], num_snippets_per_segment + 2)[1:-1], 1)
+        t_start = recording.get_start_time(segment_index=segment_index)
+        t_end = recording.get_end_time(segment_index=segment_index)
+        t_starts = np.round(np.linspace(t_start, t_end, num_snippets_per_segment + 2)[1:-1], 1)
         for snippet_index, t_start in enumerate(t_starts):
             ax_ap = axs[segment_index * 2, snippet_index]
             ax_lfp = axs[segment_index * 2 + 1, snippet_index]
@@ -246,8 +247,9 @@ def plot_psd(
 
     for segment_index in range(num_segments):
         # evenly distribute t_starts across segments
-        times = recording.get_times(segment_index=segment_index)
-        t_starts = np.round(np.linspace(times[0], times[-1], num_snippets_per_segment + 2)[1:-1], 1)
+        t_start = recording.get_start_time(segment_index=segment_index)
+        t_end = recording.get_end_time(segment_index=segment_index)
+        t_starts = np.round(np.linspace(t_start, t_end, num_snippets_per_segment + 2)[1:-1], 1)
         for snippet_index, t_start in enumerate(t_starts):
             ax_psd = axs_psd[segment_index * 2, snippet_index]
             ax_psd_channels = axs_psd[segment_index * 2 + 1, snippet_index]
@@ -746,11 +748,24 @@ def generate_event_qc(
         ax_sat_time.set_title(
             f"Saturation events:\nPositive: {len(pos_evts)} -- Negative: {len(neg_evts)}"
         )
+        # To avoid loading all timestamps in memory, we lazily load the timestamps one by one
         if len(pos_evts) > 0:
-            pos_evt_times = recording.get_times()[pos_evts["sample_index"]]
+            pos_evt_times = []
+            for evt in pos_evts:
+                segment_index = evt["segment_index"]
+                sample_index = evt["sample_index"]
+                t_start = recording.get_start_time(segment_index=segment_index)
+                evt_time = recording.get_times(segment_index=segment_index, start_frame=sample_index, end_frame=sample_index+1)[0]
+                pos_evt_times.append(evt_time + t_start)
             ax_sat_time.plot(pos_evt_times, np.ones_like(pos_evt_times), ls="", marker="|", markersize=20, color="r", label="positive")
         if len(neg_evts) > 0:
-            neg_evt_times = recording.get_times()[neg_evts["sample_index"]]
+            neg_evt_times = []
+            for evt in neg_evts:
+                segment_index = evt["segment_index"]
+                sample_index = evt["sample_index"]
+                t_start = recording.get_start_time(segment_index=segment_index)
+                evt_time = recording.get_times(segment_index=segment_index, start_frame=sample_index, end_frame=sample_index+1)[0]
+                neg_evt_times.append(evt_time + t_start)
             ax_sat_time.plot(neg_evt_times, -np.ones_like(neg_evt_times), ls="", marker="|", markersize=20, color="b", label="negative")
         ax_sat_time.legend()
         ax_sat_time.set_xlabel("Time (s)")
@@ -802,21 +817,30 @@ def generate_event_qc(
         logging.info("Generating TRIGGER EVENT metrics")
 
         # make a sorting object with the events
-        unit_dict = {}
-        for k in event_dict.keys():
-            if any(keyword in k.lower() for keyword in event_keys):
-                events = np.array(event_dict[k])
-                events_in_range = events[events >= recording.get_times()[0]]
-                events_in_range = events_in_range[events_in_range < recording.get_times()[-1]]
-                if len(events_in_range) > 0:
-                    sample_indices = recording.time_to_sample_index(events_in_range)
-                    unit_dict[k] = sample_indices
-        if len(unit_dict) > 0:
-            logging.info(f"\tFound {len(unit_dict)} trigger event sources for {event_keys} keywords.")
-            for event_key, event_values in unit_dict.items():
+        unit_dict_list = []
+        for segment_index in range(recording.get_num_segments()):
+            unit_dict = {}
+            t_start = recording.get_start_time(segment_index=segment_index)
+            t_end = recording.get_end_time(segment_index=segment_index)
+            unit_dict = {}
+            for k in event_dict.keys():
+                if any(keyword in k.lower() for keyword in event_keys):
+                    events = np.array(event_dict[k])
+                    events_in_range = events[events >= t_start]
+                    events_in_range = events_in_range[events_in_range < t_end]
+                    if len(events_in_range) > 0:
+                        sample_indices = recording.time_to_sample_index(
+                            events_in_range,
+                            segment_index=segment_index
+                        )
+                        unit_dict[k] = sample_indices
+            unit_dict_list.append(unit_dict)
+        if len(unit_dict_list) > 0:
+            logging.info(f"\tFound {len(unit_dict_list[0])} trigger event sources for {event_keys} keywords.")
+            for event_key, event_values in unit_dict_list[0].items():
                 logging.info(f"\t{event_key}: {len(event_values)} events")
             sorting_events = si.NumpySorting.from_unit_dict(
-                [unit_dict], sampling_frequency=recording.sampling_frequency
+                unit_dict_list, sampling_frequency=recording.sampling_frequency
             )
             analyzer = si.create_sorting_analyzer(sorting_events, recording, sparse=False)
 
@@ -1201,11 +1225,13 @@ def generate_firing_rate_qc(
     for segment_index in range(num_segments):
         spike_vector_segment = spike_vector[spike_vector["segment_index"] == segment_index]
 
+        spike_times = spike_vector_segment["sample_index"] / sorting_analyzer.sampling_frequency
+
+        # Instead of loading all timestamps, we just offset by start time of the segment,
+        # which is faster and uses less memory and good enough for the plot
         if recording is not None:
-            times = recording.get_times(segment_index=segment_index)
-            spike_times = times[spike_vector_segment["sample_index"]]
-        else:
-            spike_times = spike_vector_segment["sample_index"] / sorting_analyzer.sampling_frequency
+            t_start = recording.get_start_time(segment_index=segment_index)
+            spike_times = spike_times + t_start
 
         duration = sorting_analyzer.get_num_samples(segment_index=segment_index) / sorting_analyzer.sampling_frequency
         num_bins = int(np.ceil(duration / bin_duration_hist_s))
