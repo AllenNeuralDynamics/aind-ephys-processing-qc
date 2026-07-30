@@ -127,7 +127,7 @@ if __name__ == "__main__":
     ]
     if len(ecephys_sorted_folders) == 1:
         ecephys_sorted_folder = ecephys_sorted_folders[0]
-    elif (data_folder / "preprocessed").is_dir():
+    elif (data_folder / "postprocessed").is_dir():
         ecephys_sorted_folder = data_folder
     else:
         logging.info(
@@ -144,67 +144,8 @@ if __name__ == "__main__":
         job_dicts.append(job_dict)
     logging.info(f"Found {len(job_dicts)} JSON job files")
 
-    if len(job_dicts) == 0:
-        logging.info("Parsing AIND-specific input data")
-        # here we load the compressed recordings
-        if (ecephys_folder / "ecephys").is_dir():
-            ecephys_compressed_folder = ecephys_folder / "ecephys" / "ecephys_compressed"
-        else:
-            ecephys_compressed_folder = ecephys_folder / "ecephys_compressed"
-        for stream_folder in ecephys_compressed_folder.iterdir():
-            stream_name = stream_folder.name
-            if "LFP" in stream_name or "NI-DAQ" in stream_name:
-                continue
-            job_dict = {}
-            job_dict["session_name"] = ecephys_folder.name
-            recording_base_name = stream_name[: stream_name.find(".zarr")]
-            recording = si.read_zarr(stream_folder)
-            recording_lfp = None
-
-            if "AP" in stream_name:
-                lfp_stream_path = Path(str(stream_folder).replace("AP", "LFP"))
-                if lfp_stream_path.is_dir():
-                    recording_lfp = si.read_zarr(lfp_stream_path)
-            for segment_index in range(recording.get_num_segments()):
-                recording_one = si.split_recording(recording)[segment_index]
-                if recording_lfp is not None:
-                    recording_lfp_one = si.split_recording(recording_lfp)[segment_index]
-                recording_name = f"{recording_base_name}_recording{segment_index+1}"
-                # timestamps should be monotonically increasing, but we allow for small glitches
-                skip_times = False
-                for segment_index in range(recording.get_num_segments()):
-                    times = recording.get_times(segment_index=segment_index)
-                    times_diff = np.diff(times)
-                    num_negative_times = np.sum(times_diff < 0)
-
-                    if num_negative_times > 0:
-                        logging.info(f"\t{recording_name} - Times not monotonically increasing.")
-                        skip_times = True
-                job_dict["skip_times"] = skip_times
-
-                if len(np.unique(recording_one.get_channel_groups())) > 1:
-                    for group, recording_group in recording_one.split_by("group").items():
-                        job_dict["recording_name"] = f"{recording_base_name}_recording{segment_index+1}_group{group}"
-                        job_dict["recording_dict"] = recording_group.to_dict(recursive=True, relative_to=data_folder)
-                        if recording_lfp is not None:
-                            recording_lfp_group = recording_lfp_one.split_by("group")[group]
-                            job_dict["recording_lfp_dict"] = recording_lfp_group.to_dict(
-                                recursive=True, relative_to=data_folder
-                            )
-                        job_dicts.append(job_dict)
-                else:
-                    job_dict["recording_name"] = f"{recording_base_name}_recording{segment_index+1}"
-                    job_dict["recording_dict"] = recording_one.to_dict(recursive=True, relative_to=data_folder)
-                    if recording_lfp is not None:
-                        job_dict["recording_lfp_dict"] = recording_lfp_one.to_dict(
-                            recursive=True, relative_to=data_folder
-                        )
-                    job_dicts.append(job_dict)
-        logging.info(f"Found {len(job_dicts)} recordings")
-
     processing = None
     visualization_output = None
-
     if ecephys_sorted_folder is not None:
         processing_json_file = ecephys_sorted_folder / "processing.json"
         if processing_json_file.is_file():
