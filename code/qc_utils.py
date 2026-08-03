@@ -1000,23 +1000,32 @@ def generate_unit_yield_qc(
     ax_rpc.set_title(f"RP Contamination")
     ax_rpc.spines[["top", "right"]].set_visible(False)
 
-    ax_amp_cutoff = axs_yield[0, 1]
-    if not np.isnan(all_metrics["amplitude_cutoff"]).all():
-        ax_amp_cutoff.hist(all_metrics["amplitude_cutoff"], bins=20, density=True)
-    ax_amp_cutoff.set_title(f"Amplitude Cutoff")
-    ax_amp_cutoff.spines[["top", "right"]].set_visible(False)
-
-    ax_presence_ratio = axs_yield[0, 2]
+    ax_presence_ratio = axs_yield[0, 1]
     if not np.isnan(all_metrics["presence_ratio"]).all():
         ax_presence_ratio.hist(all_metrics["presence_ratio"], bins=20, density=True)
     ax_presence_ratio.set_title(f"Presence Ratio")
     ax_presence_ratio.spines[["top", "right"]].set_visible(False)
 
+    # Amplitude cutoff could be absent if spike_amplitudes are not computed
+    ax_amp_cutoff = axs_yield[0, 2]
+    if "amplitude_cutoff" in all_metrics.columns:
+        if not np.isnan(all_metrics["amplitude_cutoff"]).all():
+            ax_amp_cutoff.hist(all_metrics["amplitude_cutoff"], bins=20, density=True)
+        ax_amp_cutoff.set_title(f"Amplitude Cutoff")
+        ax_amp_cutoff.spines[["top", "right"]].set_visible(False)
+    else:
+        ax_amp_cutoff.axis("off")
+
+
+    # Drift ptp could be absent if spike_locations are not computed
     ax_drift = axs_yield[1, 0]
-    if not np.isnan(all_metrics['drift_ptp']).all():
-        ax_drift.hist(all_metrics['drift_ptp'], bins=20, density=True)
-    ax_drift.set_title(f"Drift Peak to Peak")
-    ax_drift.spines[["top", "right"]].set_visible(False)
+    if "drift_ptp" in all_metrics.columns:
+        if not np.isnan(all_metrics['drift_ptp']).all():
+            ax_drift.hist(all_metrics['drift_ptp'], bins=20, density=True)
+        ax_drift.set_title(f"Drift Peak to Peak")
+        ax_drift.spines[["top", "right"]].set_visible(False)
+    else:
+        ax_drift.axis("off")
 
     ax_snr = axs_yield[1, 1]
     if not np.isnan(all_metrics['snr']).all():
