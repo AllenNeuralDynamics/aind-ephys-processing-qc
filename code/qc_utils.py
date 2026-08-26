@@ -200,8 +200,8 @@ def plot_raw_data(
                 ax_ap.set_title(f"seg{segment_index} @ {t_start}s\nAP")
                 ax_lfp.set_title(f"LFP")
             if snippet_index == 0:
-                ax_ap.set_ylabel("Depth ($\mu m$)")
-                ax_lfp.set_ylabel("Depth ($\mu m$)")
+                ax_ap.set_ylabel("Depth ($\\mu m$)")
+                ax_lfp.set_ylabel("Depth ($\\mu m$)")
             else:
                 ax_ap.set_yticklabels([])
                 ax_lfp.set_yticklabels([])
@@ -279,8 +279,8 @@ def plot_psd(
             )
             ax_psd.set_title(f"seg{segment_index} @ {t_start}s")
             if snippet_index == 0:
-                ax_psd.set_ylabel("Power ($\mu V^2/Hz$)")
-                ax_psd_channels.set_ylabel("Depth ($\mu$ m)")
+                ax_psd.set_ylabel("Power ($\\mu V^2/Hz$)")
+                ax_psd_channels.set_ylabel("Depth ($\\mu m$)")
             if segment_index == num_segments - 1:
                 ax_psd_channels.set_xlabel("Frequency (Hz)")
 
@@ -326,8 +326,8 @@ def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None
     if surface_channel_y_position is not None:
         ax_rms.axhline(y=surface_channel_y_position, c='g')
 
-    ax_rms.set_xlabel("RMS ($\mu V$)")
-    ax_rms.set_ylabel("Depth ($\mu m$)")
+    ax_rms.set_xlabel("RMS ($\\mu V$)")
+    ax_rms.set_ylabel("Depth ($\\mu m$)")
     ax_rms.spines[["right", "top"]].set_visible(False)
 
     fig_rms.subplots_adjust(top=0.8)
@@ -664,8 +664,8 @@ def generate_drift_qc(
 
     ax_drift.set_title(
         f"Preset: {motion_preset}\n"
-        f"Max displacement: {max_displacement} $\mu m$ (depth: {depth_at_max_displacement} ) $\\mu m$\n"
-        f"Max cumulative drift: {max_cumulative_drift} $\mu m$ (depth: {depth_at_max_cumulative_drift} ) $\\mu m$\n"
+        f"Max displacement: {max_displacement} $ \\mu m$ (depth: {depth_at_max_displacement} ) $\\mu m$\n"
+        f"Max cumulative drift: {max_cumulative_drift} $\\mu m$ (depth: {depth_at_max_cumulative_drift} ) $\\mu m$\n"
     )
 
     drift_map_path = recording_fig_folder / "drift_map.png"
@@ -762,26 +762,35 @@ def generate_event_qc(
         ax_sat_time.set_title(
             f"Saturation events:\nPositive: {len(pos_evts)} -- Negative: {len(neg_evts)}"
         )
-        # To avoid loading all timestamps in memory, we lazily load the timestamps one by one
-        if len(pos_evts) > 0:
-            pos_evt_times = []
-            for evt in pos_evts:
-                segment_index = evt["segment_index"]
-                sample_index = evt["sample_index"]
-                t_start = recording.get_start_time(segment_index=segment_index)
-                evt_time = recording.get_times(segment_index=segment_index, start_frame=sample_index, end_frame=sample_index+1)[0]
-                pos_evt_times.append(evt_time + t_start)
-            ax_sat_time.plot(pos_evt_times, np.ones_like(pos_evt_times), ls="", marker="|", markersize=20, color="r", label="positive")
-        if len(neg_evts) > 0:
-            neg_evt_times = []
-            for evt in neg_evts:
-                segment_index = evt["segment_index"]
-                sample_index = evt["sample_index"]
-                t_start = recording.get_start_time(segment_index=segment_index)
-                evt_time = recording.get_times(segment_index=segment_index, start_frame=sample_index, end_frame=sample_index+1)[0]
-                neg_evt_times.append(evt_time + t_start)
-            ax_sat_time.plot(neg_evt_times, -np.ones_like(neg_evt_times), ls="", marker="|", markersize=20, color="b", label="negative")
-        ax_sat_time.legend()
+        # Loop through segments to plot saturation events
+        # TODO: get event time data lazily
+        pos_label_used = False
+        neg_label_used = False
+        for segment_index in range(recording.get_num_segments()):
+            t_start = recording.get_start_time(segment_index=segment_index)
+            t_end = recording.get_end_time(segment_index=segment_index)
+            pos_evts_in_segment = pos_evts[pos_evts["segment_index"] == segment_index]
+            neg_evts_in_segment = neg_evts[neg_evts["segment_index"] == segment_index]
+            # only load the timestamps if the segment has events
+            if len(pos_evts_in_segment) > 0 or len(neg_evts_in_segment) > 0:
+                times = recording.get_times(segment_index=segment_index)
+            if len(pos_evts_in_segment) > 0:
+                pos_evt_times = times[pos_evts_in_segment["sample_index"]]
+                # only label the first segment with events, to avoid duplicate legend entries
+                label = None if pos_label_used else "positive"
+                pos_label_used = True
+                ax_sat_time.plot(pos_evt_times, np.ones_like(pos_evt_times), ls="", marker="|", markersize=20, color="r", label=label)
+
+            if len(neg_evts_in_segment) > 0:
+                neg_evt_times = times[neg_evts_in_segment["sample_index"]]
+                label = None if neg_label_used else "negative"
+                neg_label_used = True
+                ax_sat_time.plot(neg_evt_times, -np.ones_like(neg_evt_times), ls="", marker="|", markersize=20, color="b", label=label)
+
+            ax_sat_time.axvline(x=t_start, color="k", linestyle="--", alpha=0.5)
+            ax_sat_time.axvline(x=t_end, color="k", linestyle="--", alpha=0.5)
+        if pos_label_used or neg_label_used:
+            ax_sat_time.legend()
         ax_sat_time.set_xlabel("Time (s)")
         ax_sat_time.set_ylabel("Sign")
         ax_sat_time.set_yticks([-1, +1])
@@ -831,28 +840,40 @@ def generate_event_qc(
         logging.info("Generating TRIGGER EVENT metrics")
 
         # make a sorting object with the events
+        # all segments must share the same unit keys, so we select them once here
+        matching_event_keys = [
+            k for k in event_dict.keys() if any(keyword in k.lower() for keyword in event_keys)
+        ]
         unit_dict_list = []
         for segment_index in range(recording.get_num_segments()):
             unit_dict = {}
             t_start = recording.get_start_time(segment_index=segment_index)
             t_end = recording.get_end_time(segment_index=segment_index)
-            unit_dict = {}
-            for k in event_dict.keys():
-                if any(keyword in k.lower() for keyword in event_keys):
-                    events = np.array(event_dict[k])
-                    events_in_range = events[events >= t_start]
-                    events_in_range = events_in_range[events_in_range < t_end]
-                    if len(events_in_range) > 0:
-                        sample_indices = recording.time_to_sample_index(
-                            events_in_range,
-                            segment_index=segment_index
-                        )
-                        unit_dict[k] = sample_indices
+            for k in matching_event_keys:
+                events = np.array(event_dict[k])
+                events_in_range = events[events >= t_start]
+                events_in_range = events_in_range[events_in_range < t_end]
+                if len(events_in_range) > 0:
+                    sample_indices = recording.time_to_sample_index(
+                        events_in_range,
+                        segment_index=segment_index
+                    )
+                else:
+                    sample_indices = np.array([], dtype="int64")
+                unit_dict[k] = sample_indices
             unit_dict_list.append(unit_dict)
-        if len(unit_dict_list) > 0:
-            logging.info(f"\tFound {len(unit_dict_list[0])} trigger event sources for {event_keys} keywords.")
-            for event_key, event_values in unit_dict_list[0].items():
-                logging.info(f"\t{event_key}: {len(event_values)} events")
+        # drop keys without events in any segment: they would end up as units with no spikes
+        num_events_per_key = {
+            k: sum(len(unit_dict[k]) for unit_dict in unit_dict_list) for k in matching_event_keys
+        }
+        event_keys_with_events = [k for k, num_events in num_events_per_key.items() if num_events > 0]
+        unit_dict_list = [
+            {k: unit_dict[k] for k in event_keys_with_events} for unit_dict in unit_dict_list
+        ]
+        if len(event_keys_with_events) > 0:
+            logging.info(f"\tFound {len(event_keys_with_events)} trigger event sources for {event_keys} keywords.")
+            for event_key in event_keys_with_events:
+                logging.info(f"\t{event_key}: {num_events_per_key[event_key]} events")
             sorting_events = si.NumpySorting.from_unit_dict(
                 unit_dict_list, sampling_frequency=recording.sampling_frequency
             )
@@ -1564,7 +1585,11 @@ def find_saturation_events(
     )
 
     # only keep unique saturation events
-    outs = outs[np.unique(outs["sample_index"], return_index=True)[1]]
+    # sample indices restart at each segment, so uniqueness is on the (segment, sample) pair
+    _, unique_indices = np.unique(
+        np.stack([outs["segment_index"], outs["sample_index"]]), axis=1, return_index=True
+    )
+    outs = outs[np.sort(unique_indices)]
 
     positive_saturation_events = outs[outs["amplitude"] > 0]
     negative_saturation_events = outs[outs["amplitude"] < 0]
