@@ -465,7 +465,7 @@ def generate_raw_qc(
         stage=Stage.RAW,
         description=psd_metric_description,
         reference=str(psd_path),
-        value=None,
+        value=value,
         status_history=[status_pass],
         tags={
             "probe": recording_name_abbrv
