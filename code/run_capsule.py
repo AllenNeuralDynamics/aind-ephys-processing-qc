@@ -3,7 +3,6 @@
 import os
 import sys
 import argparse
-import shutil
 import json
 import numpy as np
 import time
@@ -12,6 +11,7 @@ from pathlib import Path
 
 
 import spikeinterface as si
+import spikeinterface.preprocessing as spre
 
 # AIND
 from aind_data_schema.core.processing import Processing
@@ -162,7 +162,6 @@ if __name__ == "__main__":
                 visualization_output = json.load(f)
 
     event_dict = None
-
     if ecephys_folder is not None:
         harp_folder = [p for p in (ecephys_folder / "behavior").glob("**/raw.harp")]
         if len(harp_folder) == 1:
@@ -198,11 +197,23 @@ if __name__ == "__main__":
         if skip_times:
             logging.info(f"Resetting times for {recording_name}")
             recording.reset_times()
+        if recording.get_dtype().kind == "u":
+            logging.info(
+                f"Recording has unsigned integer dtype {recording.get_dtype()}. "
+                "Converting to signed integer."
+            )
+            recording = spre.unsigned_to_signed(recording)
         recording_lfp_dict = job_dict.get("recording_lfp_dict")
         if recording_lfp_dict is not None:
             recording_lfp = si.load(recording_lfp_dict, base_folder=data_folder)
             if skip_times:
                 recording_lfp.reset_times()
+            if recording_lfp.get_dtype().kind == "u":
+                logging.info(
+                    f"Recording LFP has unsigned integer dtype {recording_lfp.get_dtype()}. "
+                    "Converting to signed integer."
+                )
+                recording_lfp = spre.unsigned_to_signed(recording_lfp)
         else:
             recording_lfp = None
         session_name = job_dict["session_name"]
