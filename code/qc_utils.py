@@ -170,7 +170,7 @@ def plot_raw_data(
                 time_range=[t_start, t_start + duration_s],
                 segment_index=segment_index,
                 mode="map",
-                return_scaled=True,
+                return_in_uV=True,
                 with_colorbar=True,
                 ax=ax_ap,
                 clim=(-50, 50),
@@ -180,7 +180,7 @@ def plot_raw_data(
                 time_range=[t_start, t_start + duration_s],
                 segment_index=segment_index,
                 mode="map",
-                return_scaled=True,
+                return_in_uV=True,
                 with_colorbar=True,
                 ax=ax_lfp,
                 clim=(-300, 300),
@@ -257,7 +257,7 @@ def plot_psd(
             start_frame = recording.time_to_sample_index(t_start, segment_index=segment_index)
             end_frame = recording.time_to_sample_index(t_start + duration_s, segment_index=segment_index)
             traces = recording.get_traces(
-                start_frame=start_frame, end_frame=end_frame, segment_index=segment_index, return_scaled=True
+                start_frame=start_frame, end_frame=end_frame, segment_index=segment_index, return_in_uV=True
             )
 
             power_channels = []
@@ -307,7 +307,7 @@ def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None
 
     recording = spre.average_across_direction(recording, direction="y")
 
-    data_raw = si.get_random_data_chunks(recording, return_scaled=True)
+    data_raw = si.get_random_data_chunks(recording, return_in_uV=True)
     depths_raw = recording.get_channel_locations()[:, 1]
     rms_raw = np.sqrt(np.sum(data_raw**2, axis=0) / data_raw.shape[0])
 
@@ -315,7 +315,7 @@ def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None
 
     if recording_preprocessed is not None:
         recording_preprocessed = spre.average_across_direction(recording_preprocessed, direction="y")
-        data_pre = si.get_random_data_chunks(recording_preprocessed, return_scaled=True)
+        data_pre = si.get_random_data_chunks(recording_preprocessed, return_in_uV=True)
 
         depths_pre = recording_preprocessed.get_channel_locations()[:, 1]
         rms_pre = np.sqrt(np.sum(data_pre**2, axis=0) / data_pre.shape[0])
@@ -578,7 +578,7 @@ def generate_drift_qc(
     all_peak_locations = motion_info["peak_locations"]
     motion = motion_info["motion"]
     motion_params = motion_info["parameters"]
-    motion_preset = motion_params["preset"]
+    motion_preset = motion_params.get("preset", "Unknown")
 
     motion_sorter = None
     if motion_sorter_path is not None and motion_sorter_path.is_dir():
@@ -1075,7 +1075,7 @@ def generate_unit_yield_qc(
         list(si.get_template_extremum_channel(sorting_analyzer, mode="peak_to_peak", outputs="index").values())
     )
     channel_depths = sorting_analyzer.get_channel_locations()[channel_indices, 1]
-    amplitudes = np.array(list(si.get_template_amplitude_on_main_channel(sorting_analyzer, peak_mode="peak_to_peak").values()))
+    amplitudes = si.get_template_amplitude_on_main_channel(sorting_analyzer, peak_mode="peak_to_peak", with_dict=False)
 
     nn_colors = {"neural": "green", "noise": "red"}
 
