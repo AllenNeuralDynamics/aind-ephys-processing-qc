@@ -1075,7 +1075,13 @@ def generate_unit_yield_qc(
         list(si.get_template_extremum_channel(sorting_analyzer, mode="peak_to_peak", outputs="index").values())
     )
     channel_depths = sorting_analyzer.get_channel_locations()[channel_indices, 1]
-    amplitudes = si.get_template_amplitude_on_main_channel(sorting_analyzer, peak_mode="peak_to_peak", with_dict=False)
+    amplitudes = np.array(
+        si.get_template_amplitude_on_main_channel(
+            sorting_analyzer,
+             peak_mode="peak_to_peak",
+              with_dict=False
+        )
+    )
 
     nn_colors = {"neural": "green", "noise": "red"}
 
