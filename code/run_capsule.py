@@ -1,6 +1,7 @@
 """ Quality control for ecephys pipeline """
 
 import os
+import shutil
 import sys
 import argparse
 import json
@@ -374,6 +375,13 @@ def run() -> None:
             allow_tag_failures=allow_tag_failures
         )
         quality_control.write_standard_file(output_directory=results_folder, suffix=f"_{recording_name}.json")
+
+        # copy data_description for QC collector
+        if ecephys_folder is not None:
+            data_description_json = list(ecephys_folder.glob("**/data_description.json"))
+            if len(data_description_json) > 0:
+                data_description_json = data_description_json[0]
+                shutil.copy(data_description_json, results_folder / f"qc_{recording_name}_data_description.json")
 
     t_qc_end_all = time.perf_counter()
     elapsed_time_qc_all = np.round(t_qc_end_all - t_qc_start_all, 2)
