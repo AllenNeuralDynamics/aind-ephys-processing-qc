@@ -56,63 +56,7 @@ parser.add_argument(
     help="Path to the data folder containing the ecephys session.",
 )
 
-parser.add_argument(
-    "--logging",
-    default=None,
-    help=(
-        "Logging configuration, either as a JSON string or as a path to a JSON file. "
-        "The JSON must define a 'package' field ('logging' or 'log-schema') and an optional "
-        "'logging_cfg' field. If not provided, a default logging configuration is used."
-    ),
-)
-
-
-def setup_logging(logging_arg: str | None):
-    """
-    This function sets up logging, either with the standard `logging` package
-    or with `log-schema`. The `logging_arg` can be a JSON string or a path to
-    a JSON file. If None, a default `logging` configuration is used.
-    """
-    if logging_arg is None:
-        logging.basicConfig(level="INFO", stream=sys.stdout, format="%(message)s")
-        return
-
-    if Path(logging_arg).is_file():
-        with open(logging_arg, "r") as f:
-            logging_config = json.load(f)
-    else:
-        logging_config = json.loads(logging_arg)
-
-    if logging_config["package"] == "logging":
-        logging_cfg = logging_config.get("logging_cfg", {})
-        logging.basicConfig(stream=sys.stdout, **logging_cfg)
-    elif logging_config["package"] == "log-schema":
-        import log_schema
-
-        pipeline_name = logging_config.get("pipeline_name", PIPELINE_NAME)
-        acquisition_name = logging_config.get("acquisition_name", None)
-
-        if acquisition_name is None:
-            data_description_json = list(data_folder.glob("**/data_description.json"))
-            if len(data_description_json) > 0:
-                data_description_json = data_description_json[0]
-                with open(data_description_json, "r") as f:
-                    data_description = json.load(f)
-                acquisition_name = data_description["name"]
-
-        config = logging_config.get("logging_cfg")
-        if config is not None and len(config) == 0:
-            config = None
-        log_schema.setup_logging(
-            config=config,
-            model={
-                "pipeline_name": pipeline_name,
-                "acquisition_name": acquisition_name,
-                "process_name": "Quality Control",
-            },
-        )
-    else:
-        raise ValueError(f"Unsupported logging package: {logging_config['package']}")
+parser.add_argument("--params", default=None, help="Path to the parameters file or JSON string. If given, it will override all other arguments.")
 
 
 def run() -> None:
@@ -128,10 +72,59 @@ def run() -> None:
     if MIN_DURATION_ALLOW_FAILED is None:
         MIN_DURATION_ALLOW_FAILED = 0
     MIN_DURATION_ALLOW_FAILED = float(MIN_DURATION_ALLOW_FAILED)
-    pipeline_data_path = args.pipeline_data_path
+    PIPELINE_DATA_PATH = args.pipeline_data_path
+
+    PARAMS = args.params
+
+    if PARAMS is not None:
+        try:
+            # try to parse the JSON string first to avoid file name too long error
+            qc_params = json.loads(PARAMS)
+        except json.JSONDecodeError:
+            if Path(PARAMS).is_file():
+                with open(PARAMS, "r") as f:
+                    qc_params = json.load(f)
+            else:
+                raise ValueError(f"Invalid parameters: {PARAMS} is not a valid JSON string or file path")
+    else:
+        with open("params.json", "r") as f:
+            qc_params = json.load(f)
+
+    # TODO: temporary - remove from params.json when logging is distributed by pipeline
+    LOGGING = qc_params.pop("logging", None)
 
     # setup logging before any other logging call
-    setup_logging(args.logging)
+    if LOGGING is None:
+        logging.basicConfig(level="INFO", stream=sys.stdout, format="%(message)s")
+    else:
+        if LOGGING["package"] == "logging":
+            logging_cfg = LOGGING.get("logging_cfg", {})
+            logging.basicConfig(stream=sys.stdout, **logging_cfg)
+        elif LOGGING["package"] == "log-schema":
+            import log_schema
+
+            pipeline_name = LOGGING.get("pipeline_name", "AIND Ephys Pipeline")
+            acquisition_name = LOGGING.get("acquisition_name", None)
+
+            if acquisition_name is None:
+                data_description_json = list(data_folder.glob("**/data_description.json"))
+                if len(data_description_json) > 0:
+                    data_description_json = data_description_json[0]
+                    with open(data_description_json, "r") as f:
+                        data_description = json.load(f)
+                    acquisition_name = data_description["name"]
+
+            config = LOGGING.get("logging_cfg")
+            if config is not None and len(config) == 0:
+                config = None
+            log_schema.setup_logging(
+                config=config,
+                model={
+                    "pipeline_name": pipeline_name,
+                    "acquisition_name": acquisition_name,
+                    "process_name": "Ephys visualization"
+                }
+            )
 
     logging.info("Begin processing...", extra={"event_type": "stage_start"})
 
@@ -267,7 +260,7 @@ def run() -> None:
         if ecephys_sorted_folder is not None:
             sorting_analyzer = None
             preprocessed_json_file = ecephys_sorted_folder / "preprocessed" / f"{recording_name}.json"
-            base_folder = data_folder if pipeline_data_path is None else pipeline_data_path
+            base_folder = data_folder if PIPELINE_DATA_PATH is None else PIPELINE_DATA_PATH
             recording_preprocessed = load_preprocessed_recording(
                 preprocessed_json_file, session_name, ecephys_folder, base_folder
             )
