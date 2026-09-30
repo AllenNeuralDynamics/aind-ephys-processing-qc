@@ -1,6 +1,7 @@
 """ Quality control for ecephys pipeline """
 
 import os
+import shutil
 import sys
 import argparse
 import json
@@ -16,12 +17,6 @@ import spikeinterface.preprocessing as spre
 # AIND
 from aind_data_schema.core.processing import Processing
 from aind_data_schema.core.quality_control import QualityControl
-
-try:
-    from aind_log_utils import log
-    HAVE_AIND_LOG_UTILS = True
-except ImportError:
-    HAVE_AIND_LOG_UTILS = False
 
 from qc_utils import (
     load_preprocessed_recording,
@@ -60,8 +55,11 @@ parser.add_argument(
     help="Path to the data folder containing the ecephys session.",
 )
 
+parser.add_argument("--params", default=None, help="Path to the parameters file or JSON string. If given, it will override all other arguments.")
 
-if __name__ == "__main__":
+
+def run() -> None:
+    """Entrypoint for the quality control capsule."""
     t_qc_start_all = time.perf_counter()
 
     args = parser.parse_args()
@@ -73,7 +71,61 @@ if __name__ == "__main__":
     if MIN_DURATION_ALLOW_FAILED is None:
         MIN_DURATION_ALLOW_FAILED = 0
     MIN_DURATION_ALLOW_FAILED = float(MIN_DURATION_ALLOW_FAILED)
-    pipeline_data_path = args.pipeline_data_path
+    PIPELINE_DATA_PATH = args.pipeline_data_path
+
+    PARAMS = args.params
+
+    if PARAMS is not None:
+        try:
+            # try to parse the JSON string first to avoid file name too long error
+            qc_params = json.loads(PARAMS)
+        except json.JSONDecodeError:
+            if Path(PARAMS).is_file():
+                with open(PARAMS, "r") as f:
+                    qc_params = json.load(f)
+            else:
+                raise ValueError(f"Invalid parameters: {PARAMS} is not a valid JSON string or file path")
+    else:
+        with open("params.json", "r") as f:
+            qc_params = json.load(f)
+
+    # TODO: temporary - remove from params.json when logging is distributed by pipeline
+    LOGGING = qc_params.pop("logging", None)
+
+    # setup logging before any other logging call
+    if LOGGING is None:
+        logging.basicConfig(level="INFO", stream=sys.stdout, format="%(message)s")
+    else:
+        if LOGGING["package"] == "logging":
+            logging_cfg = LOGGING.get("logging_cfg", {})
+            logging.basicConfig(stream=sys.stdout, **logging_cfg)
+        elif LOGGING["package"] == "log-schema":
+            import log_schema
+
+            pipeline_name = LOGGING.get("pipeline_name", "AIND Ephys Pipeline")
+            acquisition_name = LOGGING.get("acquisition_name", None)
+
+            if acquisition_name is None:
+                data_description_json = list(data_folder.glob("**/data_description.json"))
+                if len(data_description_json) > 0:
+                    data_description_json = data_description_json[0]
+                    with open(data_description_json, "r") as f:
+                        data_description = json.load(f)
+                    acquisition_name = data_description["name"]
+
+            config = LOGGING.get("logging_cfg")
+            if config is not None and len(config) == 0:
+                config = None
+            log_schema.setup_logging(
+                config=config,
+                model={
+                    "pipeline_name": pipeline_name,
+                    "acquisition_name": acquisition_name,
+                    "process_name": "Quality Control"
+                }
+            )
+
+    logging.info("Begin processing...", extra={"event_type": "stage_start"})
 
     # pipeline mode VS capsule mode
     ecephys_folders = [
@@ -86,29 +138,6 @@ if __name__ == "__main__":
     ecephys_folder = None
     if len(ecephys_folders) == 1:
         ecephys_folder = ecephys_folders[0]
-        if HAVE_AIND_LOG_UTILS:
-            # look for subject.json and data_description.json files
-            subject_json = ecephys_folder / "subject.json"
-            subject_id = "undefined"
-            if subject_json.is_file():
-                subject_data = json.load(open(subject_json, "r"))
-                subject_id = subject_data["subject_id"]
-
-            data_description_json = ecephys_folder / "data_description.json"
-            session_name = "undefined"
-            if data_description_json.is_file():
-                data_description = json.load(open(data_description_json, "r"))
-                session_name = data_description["name"]
-
-            log.setup_logging(
-                "Quality Control Ecephys",
-                subject_id=subject_id,
-                asset_name=session_name,
-            )
-        else:
-            logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
-    else:
-        logging.basicConfig(level=logging.INFO, stream=sys.stdout, format="%(message)s")
 
     logging.info(f"Running Ephys QC with the following parameters:")
     logging.info(f"\tCOMPUTE EVENT METRICS: {COMPUTE_EVENT_METRIC}")
@@ -163,6 +192,14 @@ if __name__ == "__main__":
 
     event_dict = None
     if ecephys_folder is not None:
+        # used to disambiguate multiple behavior JSON files
+        data_description_json = ecephys_folder / "data_description.json"
+        asset_name = "undefined"
+        if data_description_json.is_file():
+            with open(data_description_json, "r") as f:
+                data_description = json.load(f)
+            asset_name = data_description["name"]
+
         harp_folder = [p for p in (ecephys_folder / "behavior").glob("**/raw.harp")]
         if len(harp_folder) == 1:
             harp_folder = harp_folder[0]
@@ -174,8 +211,8 @@ if __name__ == "__main__":
             elif len(event_json_files) > 1:
                 logging.info(f"Found {len(event_json_files)} JSON files in behavior folder. Determining behavior file by name")
                 # the JSON file should start with {subject_id}_{date}
-                if session_name != "undefined":
-                    subject_date_str = "_".join(session_name.split("_")[1:-1])
+                if asset_name != "undefined":
+                    subject_date_str = "_".join(asset_name.split("_")[1:-1])
                     for json_file in event_json_files:
                         if json_file.name.startswith(subject_date_str):
                             event_json_file = json_file
@@ -222,7 +259,7 @@ if __name__ == "__main__":
         if ecephys_sorted_folder is not None:
             sorting_analyzer = None
             preprocessed_json_file = ecephys_sorted_folder / "preprocessed" / f"{recording_name}.json"
-            base_folder = data_folder if pipeline_data_path is None else pipeline_data_path
+            base_folder = data_folder if PIPELINE_DATA_PATH is None else PIPELINE_DATA_PATH
             recording_preprocessed = load_preprocessed_recording(
                 preprocessed_json_file, session_name, ecephys_folder, base_folder
             )
@@ -337,7 +374,23 @@ if __name__ == "__main__":
         )
         quality_control.write_standard_file(output_directory=results_folder, suffix=f"_{recording_name}.json")
 
+        # copy data_description for QC collector
+        if ecephys_folder is not None:
+            data_description_json = list(ecephys_folder.glob("**/data_description.json"))
+            if len(data_description_json) > 0:
+                data_description_json = data_description_json[0]
+                shutil.copy(data_description_json, results_folder / f"qc_{recording_name}_data_description.json")
+
     t_qc_end_all = time.perf_counter()
     elapsed_time_qc_all = np.round(t_qc_end_all - t_qc_start_all, 2)
 
     logging.info(f"EPHYS QC time: {elapsed_time_qc_all}s")
+    logging.info("Pipeline stage completed", extra={"event_type": "stage_complete"})
+
+
+if __name__ == "__main__":
+    try:
+        run()
+    except Exception as e:
+        logging.exception("Pipeline stage failed", extra={"event_type": "stage_error"})
+        raise
