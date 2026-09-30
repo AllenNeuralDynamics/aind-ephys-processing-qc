@@ -32,8 +32,6 @@ from qc_utils import (
 data_folder = Path("../data")
 results_folder = Path("../results")
 
-PIPELINE_NAME = "AIND Ephys Pipeline"
-
 # Define argument parser
 parser = argparse.ArgumentParser(description="Compute Quality Control for Ephys pipeline")
 
