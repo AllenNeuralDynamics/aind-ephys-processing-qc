@@ -1,4 +1,4 @@
-# hash:sha256:d726cca968760d34aa2e2beba4f7ce0f047cc2a51a24c1bb689fe1356c408bbd
+# hash:sha256:6cc6ba5afb3e41447f888df49205e5b0e844674ac7db1247c4c27bb39101a7a1
 ARG REGISTRY_HOST
 FROM $REGISTRY_HOST/codeocean/mambaforge3:23.1.0-4-python3.10.12-ubuntu22.04
 
@@ -17,5 +17,5 @@ RUN pip install -U --no-cache-dir \
     log-schema==0.2.10.dev1 \
     matplotlib-venn==1.1.2 \
     s3fs==2025.5.1 \
-    spikeinterface[full,widgets]==0.104.7 \
+    spikeinterface[full,widgets]==0.105.0 \
     wavpack-numcodecs==0.2.2
