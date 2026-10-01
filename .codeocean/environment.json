@@ -1,7 +1,6 @@
 {
 	"version": 1,
 	"base_image": "codeocean/mambaforge3:23.1.0-4-python3.10.12-ubuntu22.04",
-	"post_install": true,
 	"options": {
 		"registry_host_arg": true,
 		"git_ask_pass": true,
@@ -32,16 +31,16 @@
 					"version": "0.6.4"
 				},
 				{
+					"name": "log-schema",
+					"version": "0.2.10.dev1"
+				},
+				{
 					"name": "matplotlib-venn",
 					"version": "1.1.2"
 				},
 				{
-					"name": "s3fs",
-					"version": "2025.5.1"
-				},
-				{
 					"name": "spikeinterface[full,widgets]",
-					"version": "0.104.7"
+					"version": "0.105.0"
 				},
 				{
 					"name": "wavpack-numcodecs",
