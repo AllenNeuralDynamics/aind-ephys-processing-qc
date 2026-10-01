@@ -160,8 +160,9 @@ def plot_raw_data(
 
     for segment_index in range(num_segments):
         # evenly distribute t_starts across segments
-        times = recording.get_times(segment_index=segment_index)
-        t_starts = np.round(np.linspace(times[0], times[-1], num_snippets_per_segment + 2)[1:-1], 1)
+        t_start = recording.get_start_time(segment_index=segment_index)
+        t_end = recording.get_end_time(segment_index=segment_index)
+        t_starts = np.round(np.linspace(t_start, t_end, num_snippets_per_segment + 2)[1:-1], 1)
         for snippet_index, t_start in enumerate(t_starts):
             ax_ap = axs[segment_index * 2, snippet_index]
             ax_lfp = axs[segment_index * 2 + 1, snippet_index]
@@ -199,8 +200,8 @@ def plot_raw_data(
                 ax_ap.set_title(f"seg{segment_index} @ {t_start}s\nAP")
                 ax_lfp.set_title(f"LFP")
             if snippet_index == 0:
-                ax_ap.set_ylabel("Depth ($\mu m$)")
-                ax_lfp.set_ylabel("Depth ($\mu m$)")
+                ax_ap.set_ylabel("Depth ($\\mu m$)")
+                ax_lfp.set_ylabel("Depth ($\\mu m$)")
             else:
                 ax_ap.set_yticklabels([])
                 ax_lfp.set_yticklabels([])
@@ -247,8 +248,9 @@ def plot_psd(
 
     for segment_index in range(num_segments):
         # evenly distribute t_starts across segments
-        times = recording.get_times(segment_index=segment_index)
-        t_starts = np.round(np.linspace(times[0], times[-1], num_snippets_per_segment + 2)[1:-1], 1)
+        t_start = recording.get_start_time(segment_index=segment_index)
+        t_end = recording.get_end_time(segment_index=segment_index)
+        t_starts = np.round(np.linspace(t_start, t_end, num_snippets_per_segment + 2)[1:-1], 1)
         for snippet_index, t_start in enumerate(t_starts):
             ax_psd = axs_psd[segment_index * 2, snippet_index]
             ax_psd_channels = axs_psd[segment_index * 2 + 1, snippet_index]
@@ -277,8 +279,8 @@ def plot_psd(
             )
             ax_psd.set_title(f"seg{segment_index} @ {t_start}s")
             if snippet_index == 0:
-                ax_psd.set_ylabel("Power ($\mu V^2/Hz$)")
-                ax_psd_channels.set_ylabel("Depth ($\mu$ m)")
+                ax_psd.set_ylabel("Power ($\\mu V^2/Hz$)")
+                ax_psd_channels.set_ylabel("Depth ($\\mu m$)")
             if segment_index == num_segments - 1:
                 ax_psd_channels.set_xlabel("Frequency (Hz)")
 
@@ -324,8 +326,8 @@ def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None
     if surface_channel_y_position is not None:
         ax_rms.axhline(y=surface_channel_y_position, c='g')
 
-    ax_rms.set_xlabel("RMS ($\mu V$)")
-    ax_rms.set_ylabel("Depth ($\mu m$)")
+    ax_rms.set_xlabel("RMS ($\\mu V$)")
+    ax_rms.set_ylabel("Depth ($\\mu m$)")
     ax_rms.spines[["right", "top"]].set_visible(False)
 
     fig_rms.subplots_adjust(top=0.8)
@@ -463,7 +465,7 @@ def generate_raw_qc(
         stage=Stage.RAW,
         description=psd_metric_description,
         reference=str(psd_path),
-        value=None,
+        value=value,
         status_history=[status_pass],
         tags={
             "probe": recording_name_abbrv
@@ -583,74 +585,87 @@ def generate_drift_qc(
     if motion_sorter_path is not None and motion_sorter_path.is_dir():
         motion_sorter = si.load(motion_sorter_path)
 
-    fig_drift, axs_drift = plt.subplots(ncols=recording.get_num_segments(), figsize=(10, 10))
+    # Note: motion is only single-segment, so we add vertical lines in case of multi-segment recordings
+    fig_drift, ax_drift = plt.subplots(ncols=1, figsize=(10, 10))
     y_locs = recording.get_channel_locations()[:, 1]
     sampling_frequency = recording.sampling_frequency
     depth_lim = [np.min(y_locs), np.max(y_locs)]
 
-    for segment_index in range(recording.get_num_segments()):
-        if recording.get_num_segments() == 1:
-            ax_drift = axs_drift
-        else:
-            ax_drift = axs_drift[segment_index]
+    vertical_lines = []
+    if recording.get_num_segments() > 1:
+        vertical_lines  = np.cumsum([recording.get_num_samples(segment_index=i) for i in range(recording.get_num_segments() - 1)]) / sampling_frequency
 
-        segment_mask = all_peaks["segment_index"] == segment_index
-        peaks_to_plot = all_peaks[segment_mask]
-        peak_locations_to_plot = all_peak_locations[segment_mask]
-
-        _ = sw.plot_drift_raster_map(
-            sorting_analyzer=None,
-            peaks=peaks_to_plot,
-            peak_locations=peak_locations_to_plot,
-            recording=recording,
-            sampling_frequency=sampling_frequency,
-            segment_index=segment_index,
-            depth_lim=depth_lim,
-            clim=(-200, 0),
-            cmap="Greys_r",
-            scatter_decimate=10,
-            alpha=0.3,
-            ax=ax_drift,
+    unique_segment_indices = np.unique(all_peaks["segment_index"])
+    if len(unique_segment_indices) > 1:
+        warning_msg = (
+            f"Motion peaks are detected in multiple segments: {unique_segment_indices}. "
+            "This is unexpected, as motion estimation is typically performed on a single segment. "
+            "Please check the motion estimation process and ensure that it is applied to the correct segment."
         )
-        ax_drift.spines["top"].set_visible(False)
-        ax_drift.spines["right"].set_visible(False)
+        logging.warning(warning_msg)
 
-        # Add motion from preprocessing
-        displacement_arr = motion.displacement[segment_index]
-        temporal_bins = motion.temporal_bins_s[segment_index]
-        spatial_bins = motion.spatial_bins_um
+    _ = sw.plot_drift_raster_map(
+        sorting_analyzer=None,
+        peaks=all_peaks,
+        peak_locations=all_peak_locations,
+        recording=recording,
+        sampling_frequency=sampling_frequency,
+        segment_indices=[0],
+        depth_lim=depth_lim,
+        clim=(-200, 0),
+        cmap="Greys_r",
+        scatter_decimate=10,
+        alpha=0.3,
+        ax=ax_drift,
+    )
+    ax_drift.spines["top"].set_visible(False)
+    ax_drift.spines["right"].set_visible(False)
 
-        # calculate cumulative_drift and max displacement
-        drift_ptps = np.ptp(displacement_arr, axis=0)
-        displacements_diff_arr = np.diff(displacement_arr, axis=0)
-        cumulative_drifts = np.sum(displacements_diff_arr, axis=0)
-        max_displacement_index = np.argmax(drift_ptps)
-        max_displacement = np.round(drift_ptps[max_displacement_index], 2)
-        depth_at_max_displacement = int(spatial_bins[max_displacement_index])
+    if len(vertical_lines) > 0:
+        ax_drift.axvline(x=vertical_lines[0], color="k", linestyle="--", alpha=0.5)
 
-        max_cumulative_drift_index = np.argmax(cumulative_drifts)
-        max_cumulative_drift = np.round(cumulative_drifts[max_cumulative_drift_index], 2)
-        depth_at_max_cumulative_drift = int(spatial_bins[max_cumulative_drift_index])
+    # Add motion from preprocessing
+    displacement_arr = motion.displacement[0]
+    temporal_bins = motion.temporal_bins_s[0]
+    spatial_bins = motion.spatial_bins_um
+    # Note: drift_raster_map start at 0, so we need to remove t_start from temporal_bins
+    temporal_bin_size = temporal_bins[1] - temporal_bins[0]
+    temporal_bins = temporal_bins - temporal_bins[0] + temporal_bin_size / 2
 
-        ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="red", alpha=0.5)
+    # calculate cumulative_drift and max displacement
+    drift_ptps = np.ptp(displacement_arr, axis=0)
+    displacements_diff_arr = np.diff(displacement_arr, axis=0)
+    cumulative_drifts = np.sum(displacements_diff_arr, axis=0)
+    max_displacement_index = np.argmax(drift_ptps)
+    max_displacement = np.round(drift_ptps[max_displacement_index], 2)
+    depth_at_max_displacement = int(spatial_bins[max_displacement_index])
 
-        legend_lines = [Line2D([0], [0], color='red', lw=1, label=motion_preset)]
-        ax_drift.get_lines()[-1].set_label(motion_preset)
+    max_cumulative_drift_index = np.argmax(cumulative_drifts)
+    max_cumulative_drift = np.round(cumulative_drifts[max_cumulative_drift_index], 2)
+    depth_at_max_cumulative_drift = int(spatial_bins[max_cumulative_drift_index])
 
-        if motion_sorter is not None:
-            displacement_arr = motion_sorter.displacement[segment_index]
-            temporal_bins = motion_sorter.temporal_bins_s[segment_index]
-            spatial_bins = motion_sorter.spatial_bins_um
+    ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="red", alpha=0.5)
 
-            ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="green", alpha=0.5)
-            legend_lines.append(Line2D([0], [0], color='green', lw=1, label='sorter'))
+    legend_lines = [Line2D([0], [0], color='red', lw=1, label=motion_preset)]
+    ax_drift.get_lines()[-1].set_label(motion_preset)
+
+    if motion_sorter is not None:
+        displacement_arr = motion_sorter.displacement[0]
+        temporal_bins = motion_sorter.temporal_bins_s[0]
+        spatial_bins = motion_sorter.spatial_bins_um
+        # Note: drift_raster_map start at 0, so we need to remove t_start from temporal_bins
+        temporal_bin_size = temporal_bins[1] - temporal_bins[0]
+        temporal_bins = temporal_bins - temporal_bins[0] + temporal_bin_size / 2
+
+        ax_drift.plot(temporal_bins, displacement_arr + spatial_bins, color="green", alpha=0.5)
+        legend_lines.append(Line2D([0], [0], color='green', lw=1, label='sorter'))
 
     ax_drift.legend(handles=legend_lines)
 
     ax_drift.set_title(
         f"Preset: {motion_preset}\n"
-        f"Max displacement: {max_displacement} $\mu m$ (depth: {depth_at_max_displacement} ) $\\mu m$\n"
-        f"Max cumulative drift: {max_cumulative_drift} $\mu m$ (depth: {depth_at_max_cumulative_drift} ) $\\mu m$\n"
+        f"Max displacement: {max_displacement} $ \\mu m$ (depth: {depth_at_max_displacement} ) $\\mu m$\n"
+        f"Max cumulative drift: {max_cumulative_drift} $\\mu m$ (depth: {depth_at_max_cumulative_drift} ) $\\mu m$\n"
     )
 
     drift_map_path = recording_fig_folder / "drift_map.png"
@@ -747,13 +762,35 @@ def generate_event_qc(
         ax_sat_time.set_title(
             f"Saturation events:\nPositive: {len(pos_evts)} -- Negative: {len(neg_evts)}"
         )
-        if len(pos_evts) > 0:
-            pos_evt_times = recording.get_times()[pos_evts["sample_index"]]
-            ax_sat_time.plot(pos_evt_times, np.ones_like(pos_evt_times), ls="", marker="|", markersize=20, color="r", label="positive")
-        if len(neg_evts) > 0:
-            neg_evt_times = recording.get_times()[neg_evts["sample_index"]]
-            ax_sat_time.plot(neg_evt_times, -np.ones_like(neg_evt_times), ls="", marker="|", markersize=20, color="b", label="negative")
-        ax_sat_time.legend()
+        # Loop through segments to plot saturation events
+        # TODO: get event time data lazily
+        pos_label_used = False
+        neg_label_used = False
+        for segment_index in range(recording.get_num_segments()):
+            t_start = recording.get_start_time(segment_index=segment_index)
+            t_end = recording.get_end_time(segment_index=segment_index)
+            pos_evts_in_segment = pos_evts[pos_evts["segment_index"] == segment_index]
+            neg_evts_in_segment = neg_evts[neg_evts["segment_index"] == segment_index]
+            # only load the timestamps if the segment has events
+            if len(pos_evts_in_segment) > 0 or len(neg_evts_in_segment) > 0:
+                times = recording.get_times(segment_index=segment_index)
+            if len(pos_evts_in_segment) > 0:
+                pos_evt_times = times[pos_evts_in_segment["sample_index"]]
+                # only label the first segment with events, to avoid duplicate legend entries
+                label = None if pos_label_used else "positive"
+                pos_label_used = True
+                ax_sat_time.plot(pos_evt_times, np.ones_like(pos_evt_times), ls="", marker="|", markersize=20, color="r", label=label)
+
+            if len(neg_evts_in_segment) > 0:
+                neg_evt_times = times[neg_evts_in_segment["sample_index"]]
+                label = None if neg_label_used else "negative"
+                neg_label_used = True
+                ax_sat_time.plot(neg_evt_times, -np.ones_like(neg_evt_times), ls="", marker="|", markersize=20, color="b", label=label)
+
+            ax_sat_time.axvline(x=t_start, color="k", linestyle="--", alpha=0.5)
+            ax_sat_time.axvline(x=t_end, color="k", linestyle="--", alpha=0.5)
+        if pos_label_used or neg_label_used:
+            ax_sat_time.legend()
         ax_sat_time.set_xlabel("Time (s)")
         ax_sat_time.set_ylabel("Sign")
         ax_sat_time.set_yticks([-1, +1])
@@ -803,21 +840,42 @@ def generate_event_qc(
         logging.info("Generating TRIGGER EVENT metrics")
 
         # make a sorting object with the events
-        unit_dict = {}
-        for k in event_dict.keys():
-            if any(keyword in k.lower() for keyword in event_keys):
+        # all segments must share the same unit keys, so we select them once here
+        matching_event_keys = [
+            k for k in event_dict.keys() if any(keyword in k.lower() for keyword in event_keys)
+        ]
+        unit_dict_list = []
+        for segment_index in range(recording.get_num_segments()):
+            unit_dict = {}
+            t_start = recording.get_start_time(segment_index=segment_index)
+            t_end = recording.get_end_time(segment_index=segment_index)
+            for k in matching_event_keys:
                 events = np.array(event_dict[k])
-                events_in_range = events[events >= recording.get_times()[0]]
-                events_in_range = events_in_range[events_in_range < recording.get_times()[-1]]
+                events_in_range = events[events >= t_start]
+                events_in_range = events_in_range[events_in_range < t_end]
                 if len(events_in_range) > 0:
-                    sample_indices = recording.time_to_sample_index(events_in_range)
-                    unit_dict[k] = sample_indices
-        if len(unit_dict) > 0:
-            logging.info(f"\tFound {len(unit_dict)} trigger event sources for {event_keys} keywords.")
-            for event_key, event_values in unit_dict.items():
-                logging.info(f"\t{event_key}: {len(event_values)} events")
+                    sample_indices = recording.time_to_sample_index(
+                        events_in_range,
+                        segment_index=segment_index
+                    )
+                else:
+                    sample_indices = np.array([], dtype="int64")
+                unit_dict[k] = sample_indices
+            unit_dict_list.append(unit_dict)
+        # drop keys without events in any segment: they would end up as units with no spikes
+        num_events_per_key = {
+            k: sum(len(unit_dict[k]) for unit_dict in unit_dict_list) for k in matching_event_keys
+        }
+        event_keys_with_events = [k for k, num_events in num_events_per_key.items() if num_events > 0]
+        unit_dict_list = [
+            {k: unit_dict[k] for k in event_keys_with_events} for unit_dict in unit_dict_list
+        ]
+        if len(event_keys_with_events) > 0:
+            logging.info(f"\tFound {len(event_keys_with_events)} trigger event sources for {event_keys} keywords.")
+            for event_key in event_keys_with_events:
+                logging.info(f"\t{event_key}: {num_events_per_key[event_key]} events")
             sorting_events = si.NumpySorting.from_unit_dict(
-                [unit_dict], sampling_frequency=recording.sampling_frequency
+                unit_dict_list, sampling_frequency=recording.sampling_frequency
             )
             analyzer = si.create_sorting_analyzer(sorting_events, recording, sparse=False)
 
@@ -1202,11 +1260,13 @@ def generate_firing_rate_qc(
     for segment_index in range(num_segments):
         spike_vector_segment = spike_vector[spike_vector["segment_index"] == segment_index]
 
+        spike_times = spike_vector_segment["sample_index"] / sorting_analyzer.sampling_frequency
+
+        # Instead of loading all timestamps, we just offset by start time of the segment,
+        # which is faster and uses less memory and good enough for the plot
         if recording is not None:
-            times = recording.get_times(segment_index=segment_index)
-            spike_times = times[spike_vector_segment["sample_index"]]
-        else:
-            spike_times = spike_vector_segment["sample_index"] / sorting_analyzer.sampling_frequency
+            t_start = recording.get_start_time(segment_index=segment_index)
+            spike_times = spike_times + t_start
 
         duration = sorting_analyzer.get_num_samples(segment_index=segment_index) / sorting_analyzer.sampling_frequency
         num_bins = int(np.ceil(duration / bin_duration_hist_s))
@@ -1393,12 +1453,14 @@ def generate_curation_qc(
 
     logging.info("Generating SORTING CURATION metric")
     curation_link = "https://ephys.allenneuraldynamics.org/ephys_gui_app?analyzer_path={derived_asset_location}/postprocessed/"
-    curation_link += f"{recording_name}.zarr&recording_path="
+    curation_link += f"{recording_name}.zarr"
     if raw_recording is not None:
         curation_link += "{raw_asset_location}/"
         # figure out whether ecephys_compressed or ecephys/ecephys_compressed #TODO
         recording_relative_path = get_recording_relative_path(raw_recording)
-        curation_link += recording_relative_path
+        if recording_relative_path is not None:
+            curation_link += "&recording_path={raw_asset_location}/"
+            curation_link += recording_relative_path
 
     curation_link_url = quote(curation_link)
 
@@ -1524,7 +1586,11 @@ def find_saturation_events(
     )
 
     # only keep unique saturation events
-    outs = outs[np.unique(outs["sample_index"], return_index=True)[1]]
+    # sample indices restart at each segment, so uniqueness is on the (segment, sample) pair
+    _, unique_indices = np.unique(
+        np.stack([outs["segment_index"], outs["sample_index"]]), axis=1, return_index=True
+    )
+    outs = outs[np.sort(unique_indices)]
 
     positive_saturation_events = outs[outs["amplitude"] > 0]
     negative_saturation_events = outs[outs["amplitude"] < 0]
