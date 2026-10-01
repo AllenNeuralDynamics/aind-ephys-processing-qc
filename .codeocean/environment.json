@@ -31,16 +31,16 @@
 					"version": "0.6.4"
 				},
 				{
+					"name": "log-schema",
+					"version": "0.2.10.dev1"
+				},
+				{
 					"name": "matplotlib-venn",
 					"version": "1.1.2"
 				},
 				{
-					"name": "s3fs",
-					"version": "2025.5.1"
-				},
-				{
 					"name": "spikeinterface[full,widgets]",
-					"version": "0.104.7"
+					"version": "0.105.0"
 				},
 				{
 					"name": "wavpack-numcodecs",

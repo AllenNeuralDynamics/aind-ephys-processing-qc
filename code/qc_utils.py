@@ -155,7 +155,6 @@ def plot_raw_data(
     recording_hp = spre.highpass_filter(recording, freq_min=freq_ap)
     if recording_lfp is None:
         recording_lfp = spre.bandpass_filter(recording, freq_min=0.1, freq_max=freq_lfp, ignore_low_freq_error=True)
-    
     surface_channel_y_position = _get_surface_channel(recording, channel_labels)
 
     for segment_index in range(num_segments):
@@ -171,7 +170,7 @@ def plot_raw_data(
                 time_range=[t_start, t_start + duration_s],
                 segment_index=segment_index,
                 mode="map",
-                return_scaled=True,
+                return_in_uV=True,
                 with_colorbar=True,
                 ax=ax_ap,
                 clim=(-50, 50),
@@ -181,7 +180,7 @@ def plot_raw_data(
                 time_range=[t_start, t_start + duration_s],
                 segment_index=segment_index,
                 mode="map",
-                return_scaled=True,
+                return_in_uV=True,
                 with_colorbar=True,
                 ax=ax_lfp,
                 clim=(-300, 300),
@@ -258,7 +257,7 @@ def plot_psd(
             start_frame = recording.time_to_sample_index(t_start, segment_index=segment_index)
             end_frame = recording.time_to_sample_index(t_start + duration_s, segment_index=segment_index)
             traces = recording.get_traces(
-                start_frame=start_frame, end_frame=end_frame, segment_index=segment_index, return_scaled=True
+                start_frame=start_frame, end_frame=end_frame, segment_index=segment_index, return_in_uV=True
             )
 
             power_channels = []
@@ -308,7 +307,7 @@ def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None
 
     recording = spre.average_across_direction(recording, direction="y")
 
-    data_raw = si.get_random_data_chunks(recording, return_scaled=True)
+    data_raw = si.get_random_data_chunks(recording, return_in_uV=True)
     depths_raw = recording.get_channel_locations()[:, 1]
     rms_raw = np.sqrt(np.sum(data_raw**2, axis=0) / data_raw.shape[0])
 
@@ -316,7 +315,7 @@ def plot_rms_by_depth(recording, recording_preprocessed=None, recording_lfp=None
 
     if recording_preprocessed is not None:
         recording_preprocessed = spre.average_across_direction(recording_preprocessed, direction="y")
-        data_pre = si.get_random_data_chunks(recording_preprocessed, return_scaled=True)
+        data_pre = si.get_random_data_chunks(recording_preprocessed, return_in_uV=True)
 
         depths_pre = recording_preprocessed.get_channel_locations()[:, 1]
         rms_pre = np.sqrt(np.sum(data_pre**2, axis=0) / data_pre.shape[0])
@@ -579,7 +578,7 @@ def generate_drift_qc(
     all_peak_locations = motion_info["peak_locations"]
     motion = motion_info["motion"]
     motion_params = motion_info["parameters"]
-    motion_preset = motion_params["preset"]
+    motion_preset = motion_params.get("preset", "Unknown")
 
     motion_sorter = None
     if motion_sorter_path is not None and motion_sorter_path.is_dir():
@@ -762,35 +761,26 @@ def generate_event_qc(
         ax_sat_time.set_title(
             f"Saturation events:\nPositive: {len(pos_evts)} -- Negative: {len(neg_evts)}"
         )
-        # Loop through segments to plot saturation events
-        # TODO: get event time data lazily
-        pos_label_used = False
-        neg_label_used = False
-        for segment_index in range(recording.get_num_segments()):
-            t_start = recording.get_start_time(segment_index=segment_index)
-            t_end = recording.get_end_time(segment_index=segment_index)
-            pos_evts_in_segment = pos_evts[pos_evts["segment_index"] == segment_index]
-            neg_evts_in_segment = neg_evts[neg_evts["segment_index"] == segment_index]
-            # only load the timestamps if the segment has events
-            if len(pos_evts_in_segment) > 0 or len(neg_evts_in_segment) > 0:
-                times = recording.get_times(segment_index=segment_index)
-            if len(pos_evts_in_segment) > 0:
-                pos_evt_times = times[pos_evts_in_segment["sample_index"]]
-                # only label the first segment with events, to avoid duplicate legend entries
-                label = None if pos_label_used else "positive"
-                pos_label_used = True
-                ax_sat_time.plot(pos_evt_times, np.ones_like(pos_evt_times), ls="", marker="|", markersize=20, color="r", label=label)
-
-            if len(neg_evts_in_segment) > 0:
-                neg_evt_times = times[neg_evts_in_segment["sample_index"]]
-                label = None if neg_label_used else "negative"
-                neg_label_used = True
-                ax_sat_time.plot(neg_evt_times, -np.ones_like(neg_evt_times), ls="", marker="|", markersize=20, color="b", label=label)
-
-            ax_sat_time.axvline(x=t_start, color="k", linestyle="--", alpha=0.5)
-            ax_sat_time.axvline(x=t_end, color="k", linestyle="--", alpha=0.5)
-        if pos_label_used or neg_label_used:
-            ax_sat_time.legend()
+        # To avoid loading all timestamps in memory, we lazily load the timestamps one by one
+        if len(pos_evts) > 0:
+            pos_evt_times = []
+            for evt in pos_evts:
+                segment_index = evt["segment_index"]
+                sample_index = evt["sample_index"]
+                t_start = recording.get_start_time(segment_index=segment_index)
+                evt_time = recording.get_times(segment_index=segment_index, start_frame=sample_index, end_frame=sample_index+1)[0]
+                pos_evt_times.append(evt_time + t_start)
+            ax_sat_time.plot(pos_evt_times, np.ones_like(pos_evt_times), ls="", marker="|", markersize=20, color="r", label="positive")
+        if len(neg_evts) > 0:
+            neg_evt_times = []
+            for evt in neg_evts:
+                segment_index = evt["segment_index"]
+                sample_index = evt["sample_index"]
+                t_start = recording.get_start_time(segment_index=segment_index)
+                evt_time = recording.get_times(segment_index=segment_index, start_frame=sample_index, end_frame=sample_index+1)[0]
+                neg_evt_times.append(evt_time + t_start)
+            ax_sat_time.plot(neg_evt_times, -np.ones_like(neg_evt_times), ls="", marker="|", markersize=20, color="b", label="negative")
+        ax_sat_time.legend()
         ax_sat_time.set_xlabel("Time (s)")
         ax_sat_time.set_ylabel("Sign")
         ax_sat_time.set_yticks([-1, +1])
@@ -1047,11 +1037,26 @@ def generate_unit_yield_qc(
     ax_presence_ratio.set_title(f"Presence Ratio")
     ax_presence_ratio.spines[["top", "right"]].set_visible(False)
 
+    # Amplitude cutoff could be absent if spike_amplitudes are not computed
+    ax_amp_cutoff = axs_yield[0, 2]
+    if "amplitude_cutoff" in all_metrics.columns:
+        if not np.isnan(all_metrics["amplitude_cutoff"]).all():
+            ax_amp_cutoff.hist(all_metrics["amplitude_cutoff"], bins=20, density=True)
+        ax_amp_cutoff.set_title(f"Amplitude Cutoff")
+        ax_amp_cutoff.spines[["top", "right"]].set_visible(False)
+    else:
+        ax_amp_cutoff.axis("off")
+
+
+    # Drift ptp could be absent if spike_locations are not computed
     ax_drift = axs_yield[1, 0]
-    if not np.isnan(all_metrics['drift_ptp']).all():
-        ax_drift.hist(all_metrics['drift_ptp'], bins=20, density=True)
-    ax_drift.set_title(f"Drift Peak to Peak")
-    ax_drift.spines[["top", "right"]].set_visible(False)
+    if "drift_ptp" in all_metrics.columns:
+        if not np.isnan(all_metrics['drift_ptp']).all():
+            ax_drift.hist(all_metrics['drift_ptp'], bins=20, density=True)
+        ax_drift.set_title(f"Drift Peak to Peak")
+        ax_drift.spines[["top", "right"]].set_visible(False)
+    else:
+        ax_drift.axis("off")
 
     ax_snr = axs_yield[1, 1]
     if not np.isnan(all_metrics['snr']).all():
@@ -1070,7 +1075,13 @@ def generate_unit_yield_qc(
         list(si.get_template_extremum_channel(sorting_analyzer, mode="peak_to_peak", outputs="index").values())
     )
     channel_depths = sorting_analyzer.get_channel_locations()[channel_indices, 1]
-    amplitudes = np.array(list(si.get_template_extremum_amplitude(sorting_analyzer, mode="peak_to_peak").values()))
+    amplitudes = np.array(
+        si.get_template_amplitude_on_main_channel(
+            sorting_analyzer,
+             peak_mode="peak_to_peak",
+              with_dict=False
+        )
+    )
 
     nn_colors = {"neural": "green", "noise": "red"}
 

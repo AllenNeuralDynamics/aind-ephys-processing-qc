@@ -154,9 +154,10 @@ def run() -> None:
         for p in data_folder.iterdir()
         if p.is_dir() and ("ecephys" in p.name or "behavior" in p.name) and "sorted" in p.name
     ]
+    # TODO: fix this!
     if len(ecephys_sorted_folders) == 1:
         ecephys_sorted_folder = ecephys_sorted_folders[0]
-    elif (data_folder / "preprocessed").is_dir():
+    elif (data_folder / "postprocessed").is_dir() or (data_folder / "preprocessed").is_dir():
         ecephys_sorted_folder = data_folder
     else:
         logging.info(
@@ -257,7 +258,6 @@ def run() -> None:
         logging.info(f"Recording {recording_name}")
         recording_preprocessed = None
         if ecephys_sorted_folder is not None:
-            sorting_analyzer = None
             preprocessed_json_file = ecephys_sorted_folder / "preprocessed" / f"{recording_name}.json"
             base_folder = data_folder if PIPELINE_DATA_PATH is None else PIPELINE_DATA_PATH
             recording_preprocessed = load_preprocessed_recording(
@@ -266,6 +266,7 @@ def run() -> None:
             if recording_preprocessed is not None and skip_times:
                 recording_preprocessed.reset_times()
 
+            sorting_analyzer = None
             postprocessed_folder_zarr = ecephys_sorted_folder / "postprocessed" / f"{recording_name}.zarr"
             postprocessed_folder = ecephys_sorted_folder / "postprocessed" / recording_name
             if postprocessed_folder_zarr.is_dir():
