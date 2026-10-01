@@ -13,7 +13,6 @@ RUN apt-get update \
 
 RUN pip install -U --no-cache-dir \
     aind-data-schema==2.8.1 \
-    aind-log-utils==0.2.3 \
     aind-qcportal-schema==0.6.4 \
     log-schema==0.2.10.dev1 \
     matplotlib-venn==1.1.2 \
