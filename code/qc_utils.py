@@ -1262,28 +1262,38 @@ def generate_firing_rate_qc(
 
     num_segments = sorting_analyzer.get_num_segments()
     fig_fr, axs_fr = _get_fig_axs(num_segments, 1, subplot_figsize=(5, 3))
-    spike_vector = sorting_analyzer.sorting.to_spike_vector()
     if sorting_analyzer.has_recording():
         recording = sorting_analyzer.recording
     else:
         recording = None
 
+    # Spike counts per time bin, read in blocks: with billions of spikes the full
+    # spike vector (and a per-segment copy of it) does not fit in memory. A lazy
+    # (zarr) spike vector is only read block by block.
+    fs = sorting_analyzer.sampling_frequency
+    num_bins = [
+        int(np.ceil(sorting_analyzer.get_num_samples(segment_index=segment_index) / fs / bin_duration_hist_s))
+        for segment_index in range(num_segments)
+    ]
+    spike_counts = [np.zeros(n, dtype=np.int64) for n in num_bins]
+    spike_vector = sorting_analyzer.sorting.to_spike_vector()
+    block_size = 50_000_000  # ~1.2 GB per block
+    for i0 in range(0, len(spike_vector), block_size):
+        block = spike_vector[i0 : i0 + block_size]
+        for segment_index in np.unique(block["segment_index"]):
+            samples = block["sample_index"][block["segment_index"] == segment_index]
+            bins = np.minimum(
+                (samples / fs / bin_duration_hist_s).astype(np.int64), num_bins[segment_index] - 1
+            )
+            spike_counts[segment_index] += np.bincount(bins, minlength=num_bins[segment_index])
+        del block
+
     for segment_index in range(num_segments):
-        spike_vector_segment = spike_vector[spike_vector["segment_index"] == segment_index]
-
-        spike_times = spike_vector_segment["sample_index"] / sorting_analyzer.sampling_frequency
-
         # Instead of loading all timestamps, we just offset by start time of the segment,
         # which is faster and uses less memory and good enough for the plot
-        if recording is not None:
-            t_start = recording.get_start_time(segment_index=segment_index)
-            spike_times = spike_times + t_start
-
-        duration = sorting_analyzer.get_num_samples(segment_index=segment_index) / sorting_analyzer.sampling_frequency
-        num_bins = int(np.ceil(duration / bin_duration_hist_s))
-
-        spike_times_hist, bin_edges = np.histogram(spike_times, bins=num_bins)
-        bin_centers = bin_edges[:-1] + bin_duration_hist_s / 2
+        t_start = recording.get_start_time(segment_index=segment_index) if recording is not None else 0
+        spike_times_hist = spike_counts[segment_index]
+        bin_centers = t_start + (np.arange(num_bins[segment_index]) + 0.5) * bin_duration_hist_s
         axs_fr[segment_index, 0].plot(bin_centers, spike_times_hist)
         axs_fr[segment_index, 0].set_title(f"Population firing rate")
         axs_fr[segment_index, 0].set_xlabel("Time (s)")
