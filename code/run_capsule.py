@@ -270,7 +270,11 @@ def run() -> None:
             postprocessed_folder_zarr = ecephys_sorted_folder / "postprocessed" / f"{recording_name}.zarr"
             postprocessed_folder = ecephys_sorted_folder / "postprocessed" / recording_name
             if postprocessed_folder_zarr.is_dir():
-                sorting_analyzer = si.load(postprocessed_folder_zarr, load_extensions=False)
+                # lazy: spikes stay on disk; a non-lazy load holds 2 copies of the
+                # spike vector, which does not fit in memory for long recordings
+                sorting_analyzer = si.load_sorting_analyzer(
+                    postprocessed_folder_zarr, load_extensions=False, lazy=True
+                )
             elif postprocessed_folder.is_dir():
                 # this is for legacy waveform extractor folders
                 sorting_analyzer = si.load_waveforms(postprocessed_folder, output="SortingAnalyzer")
