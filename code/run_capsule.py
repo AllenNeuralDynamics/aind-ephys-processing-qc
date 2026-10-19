@@ -36,9 +36,9 @@ results_folder = Path("../results")
 parser = argparse.ArgumentParser(description="Compute Quality Control for Ephys pipeline")
 
 skip_event_group = parser.add_mutually_exclusive_group()
-skip_event_group_help = "Whether to compute event metrics (saturation+trigger). Default: True"
+skip_event_group_help = "Whether to compute event metrics (saturation+trigger). Default: False"
 skip_event_group.add_argument("--no-event-metrics", action="store_true", help=skip_event_group_help)
-skip_event_group.add_argument("static_compute_event", nargs="?", default="true", help=skip_event_group_help)
+skip_event_group.add_argument("static_compute_event", nargs="?", default=None, help=skip_event_group_help)
 
 
 min_duration_allow_failed_group = parser.add_mutually_exclusive_group()
@@ -63,9 +63,10 @@ def run() -> None:
     t_qc_start_all = time.perf_counter()
 
     args = parser.parse_args()
+    # Off unless "true" is passed (App Panel default: "false")
     COMPUTE_EVENT_METRIC = (
-        args.static_compute_event.lower() == "true" if args.static_compute_event
-        else not args.no_event_metrics
+        not args.no_event_metrics
+        and (args.static_compute_event or "false").strip().lower() == "true"
     )
     MIN_DURATION_ALLOW_FAILED = args.static_min_duration_allow_failed or args.min_duration_allow_failed
     if MIN_DURATION_ALLOW_FAILED is None:
