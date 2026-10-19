@@ -7,7 +7,7 @@
 			"description": "Whether to compute event metrics (saturation+trigger)",
 			"type": "list",
 			"value_type": "string",
-			"default_value": "true",
+			"default_value": "false",
 			"extra_data": [
 				"true",
 				"false"

@@ -40,7 +40,7 @@
 				},
 				{
 					"name": "spikeinterface[full,widgets]",
-					"version": "0.105.0"
+					"version": "0.105.2"
 				},
 				{
 					"name": "wavpack-numcodecs",
