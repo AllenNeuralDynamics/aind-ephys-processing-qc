@@ -25,7 +25,7 @@ The `data/` folder must include the output of the raw data, the output of the [`
 
 ### Parameters
 
-The `code/run` script takes no arguments.
+Parameters are read from a `params.json` file that must be in the root folder of the capsule (next to `code/`, i.e. `../params.json` from `code/`): the `quality_control` section (`compute_event_metrics`, `min_duration_allow_failed`, `pipeline_data_path`) and `logging`.
 
 
 ### Output
