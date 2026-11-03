@@ -103,8 +103,13 @@ def run() -> None:
         for p in data_folder.iterdir()
         if p.is_dir() and ("ecephys" in p.name or "behavior" in p.name) and "sorted" in p.name
     ]
+    # per-stream mode: inputs are one stream's step outputs (preprocessed_*, postprocessed_*, ...),
+    # not the results collector layout
+    per_stream = any(data_folder.glob("preprocessed_*.json"))
     # TODO: fix this!
-    if len(ecephys_sorted_folders) == 1:
+    if per_stream:
+        ecephys_sorted_folder = data_folder
+    elif len(ecephys_sorted_folders) == 1:
         ecephys_sorted_folder = ecephys_sorted_folders[0]
     elif (data_folder / "postprocessed").is_dir() or (data_folder / "preprocessed").is_dir():
         ecephys_sorted_folder = data_folder
@@ -125,7 +130,17 @@ def run() -> None:
 
     processing = None
     visualization_output = None
-    if ecephys_sorted_folder is not None:
+    channel_labels_by_recording = {}
+    if per_stream:
+        visualization_output = {
+            p.stem[len("visualization_"):]: json.loads(p.read_text())
+            for p in data_folder.glob("visualization_*.json")
+        }
+        for p in data_folder.glob("data_process_preprocessing_*.json"):
+            channel_labels = json.loads(p.read_text()).get("output_parameters", {}).get("channel_labels")
+            if channel_labels is not None:
+                channel_labels_by_recording[p.stem[len("data_process_preprocessing_"):]] = np.array(channel_labels)
+    elif ecephys_sorted_folder is not None:
         processing_json_file = ecephys_sorted_folder / "processing.json"
         if processing_json_file.is_file():
             try:
@@ -206,8 +221,21 @@ def run() -> None:
         session_name = job_dict["session_name"]
         logging.info(f"Recording {recording_name}")
         recording_preprocessed = None
-        if ecephys_sorted_folder is not None:
+        if per_stream:
+            preprocessed_json_file = data_folder / f"preprocessed_{recording_name}.json"
+            postprocessed_folder_zarr = data_folder / f"postprocessed_{recording_name}.zarr"
+            postprocessed_folder = postprocessed_folder_zarr
+            motion_path = data_folder / f"motion_{recording_name}"
+            motion_sorter_path = data_folder / f"spikesortedmotion_{recording_name}"
+            curation_json_file = data_folder / f"curation_{recording_name}.json"
+        elif ecephys_sorted_folder is not None:
             preprocessed_json_file = ecephys_sorted_folder / "preprocessed" / f"{recording_name}.json"
+            postprocessed_folder_zarr = ecephys_sorted_folder / "postprocessed" / f"{recording_name}.zarr"
+            postprocessed_folder = ecephys_sorted_folder / "postprocessed" / recording_name
+            motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
+            motion_sorter_path = ecephys_sorted_folder / "spikesorted" / "motion" / recording_name
+            curation_json_file = ecephys_sorted_folder / "curated" / recording_name / "curation.json"
+        if ecephys_sorted_folder is not None:
             base_folder = data_folder if PIPELINE_DATA_PATH is None else PIPELINE_DATA_PATH
             recording_preprocessed = load_preprocessed_recording(
                 preprocessed_json_file, session_name, ecephys_folder, base_folder
@@ -216,8 +244,6 @@ def run() -> None:
                 recording_preprocessed.reset_times()
 
             sorting_analyzer = None
-            postprocessed_folder_zarr = ecephys_sorted_folder / "postprocessed" / f"{recording_name}.zarr"
-            postprocessed_folder = ecephys_sorted_folder / "postprocessed" / recording_name
             if postprocessed_folder_zarr.is_dir():
                 sorting_analyzer = si.load(postprocessed_folder_zarr, load_extensions=False)
             elif postprocessed_folder.is_dir():
@@ -237,6 +263,7 @@ def run() -> None:
             recording_preprocessed=recording_preprocessed,
             processing=processing,
             visualization_output=visualization_output,
+            channel_labels=channel_labels_by_recording.get(recording_name),
         )
         all_metrics.extend(metrics_raw)
 
@@ -254,9 +281,6 @@ def run() -> None:
             logging.info("Skipping computation of event metrics.")
         
         if ecephys_sorted_folder is not None:
-            motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
-            motion_sorter_path = ecephys_sorted_folder / "spikesorted" / "motion" / recording_name
-
             # open displacement arrays
             if not motion_path.is_dir():
                 logging.info(f"\tMotion not found for {recording_name}")
@@ -274,7 +298,6 @@ def run() -> None:
         if ecephys_sorted_folder is not None:
             if sorting_analyzer is not None and sorting_analyzer.has_extension("quality_metrics") \
                 and sorting_analyzer.has_extension("template_metrics"):
-                curation_json_file = ecephys_sorted_folder / "curated" / recording_name / "curation.json"
                 if not curation_json_file.is_file():
                     curation_json_file = None
                 unit_metrics = generate_unit_yield_qc(
