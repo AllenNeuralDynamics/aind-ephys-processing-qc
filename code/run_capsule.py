@@ -3,7 +3,6 @@
 import os
 import shutil
 import sys
-import argparse
 import json
 import numpy as np
 import time
@@ -32,88 +31,38 @@ from qc_utils import (
 data_folder = Path("../data")
 results_folder = Path("../results")
 
-# Define argument parser
-parser = argparse.ArgumentParser(description="Compute Quality Control for Ephys pipeline")
-
-skip_event_group = parser.add_mutually_exclusive_group()
-skip_event_group_help = "Whether to compute event metrics (saturation+trigger). Default: True"
-skip_event_group.add_argument("--no-event-metrics", action="store_true", help=skip_event_group_help)
-skip_event_group.add_argument("static_compute_event", nargs="?", default="true", help=skip_event_group_help)
-
-
-min_duration_allow_failed_group = parser.add_mutually_exclusive_group()
-min_duration_allow_failed_help = (
-    "Minimum recording duration below which metrics will be allowed to fail. Default: 300"
-)
-min_duration_allow_failed_group.add_argument("static_min_duration_allow_failed", nargs="?", default=None, help=min_duration_allow_failed_help)
-min_duration_allow_failed_group.add_argument("--min-duration-allow-failed", default=None, help=min_duration_allow_failed_help)
-
-
-parser.add_argument(
-    "--pipeline-data-path",
-    default=None,
-    help="Path to the data folder containing the ecephys session.",
-)
-
-parser.add_argument("--params", default=None, help="Path to the parameters file or JSON string. If given, it will override all other arguments.")
+PARAMS_FILE = Path("../params.json")
 
 
 def run() -> None:
     """Entrypoint for the quality control capsule."""
     t_qc_start_all = time.perf_counter()
 
-    args = parser.parse_args()
-    COMPUTE_EVENT_METRIC = (
-        args.static_compute_event.lower() == "true" if args.static_compute_event
-        else not args.no_event_metrics
-    )
-    MIN_DURATION_ALLOW_FAILED = args.static_min_duration_allow_failed or args.min_duration_allow_failed
-    if MIN_DURATION_ALLOW_FAILED is None:
-        MIN_DURATION_ALLOW_FAILED = 0
-    MIN_DURATION_ALLOW_FAILED = float(MIN_DURATION_ALLOW_FAILED)
-    PIPELINE_DATA_PATH = args.pipeline_data_path
+    if not PARAMS_FILE.is_file():
+        raise ValueError(f"Parameters file not found: {PARAMS_FILE}")
+    with open(PARAMS_FILE, "r") as f:
+        full_params = json.load(f)
+    qc_params = full_params.get("quality_control", {})
+    logging_params = full_params.get("logging", None)
 
-    PARAMS = args.params
-
-    if PARAMS is not None:
-        try:
-            # try to parse the JSON string first to avoid file name too long error
-            qc_params = json.loads(PARAMS)
-        except json.JSONDecodeError:
-            if Path(PARAMS).is_file():
-                with open(PARAMS, "r") as f:
-                    qc_params = json.load(f)
-            else:
-                raise ValueError(f"Invalid parameters: {PARAMS} is not a valid JSON string or file path")
-    else:
-        with open("params.json", "r") as f:
-            qc_params = json.load(f)
-
-    # TODO: temporary - remove from params.json when logging is distributed by pipeline
-    LOGGING = qc_params.pop("logging", None)
+    COMPUTE_EVENT_METRIC = qc_params.get("compute_event_metrics", True)
+    MIN_DURATION_ALLOW_FAILED = float(qc_params.get("min_duration_allow_failed", 0))
+    PIPELINE_DATA_PATH = qc_params.get("pipeline_data_path", None)
 
     # setup logging before any other logging call
-    if LOGGING is None:
+    if logging_params is None:
         logging.basicConfig(level="INFO", stream=sys.stdout, format="%(message)s")
     else:
-        if LOGGING["package"] == "logging":
-            logging_cfg = LOGGING.get("logging_cfg", {})
+        if logging_params["package"] == "logging":
+            logging_cfg = logging_params.get("logging_cfg", {})
             logging.basicConfig(stream=sys.stdout, **logging_cfg)
-        elif LOGGING["package"] == "log-schema":
+        elif logging_params["package"] == "log-schema":
             import log_schema
 
-            pipeline_name = LOGGING.get("pipeline_name", "AIND Ephys Pipeline")
-            acquisition_name = LOGGING.get("acquisition_name", None)
+            pipeline_name = logging_params.get("pipeline_name", "AIND Ephys Pipeline")
+            acquisition_name = logging_params.get("acquisition_name", "unknown")
 
-            if acquisition_name is None:
-                data_description_json = list(data_folder.glob("*ecephys*/data_description.json"))
-                if len(data_description_json) > 0:
-                    data_description_json = data_description_json[0]
-                    with open(data_description_json, "r") as f:
-                        data_description = json.load(f)
-                    acquisition_name = data_description["name"]
-
-            config = LOGGING.get("logging_cfg")
+            config = logging_params.get("logging_cfg")
             if config is not None and len(config) == 0:
                 config = None
             log_schema.setup_logging(
