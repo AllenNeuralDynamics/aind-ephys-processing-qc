@@ -234,7 +234,6 @@ def run() -> None:
             quality_control_fig_folder,
             relative_to=results_folder,
             recording_lfp=recording_lfp,
-            recording_preprocessed=recording_preprocessed,
             processing=processing,
             visualization_output=visualization_output,
         )
@@ -245,6 +244,7 @@ def run() -> None:
                 recording,
                 recording_name,
                 quality_control_fig_folder,
+                recording_preprocessed=recording_preprocessed,
                 relative_to=results_folder,
                 event_dict=event_dict,
                 event_keys=["licktime", "optogeneticstime"],

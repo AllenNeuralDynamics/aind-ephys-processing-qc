@@ -114,6 +114,29 @@ def get_recording_relative_path(recording):
     return relative_path
 
 
+def find_recording_of_type(recording: si.BaseRecording, recording_type: type) -> si.BaseRecording | None:
+    """
+    Find a recording of a specific type within a preprocessed recording.
+
+    Parameters
+    ----------
+    recording : BaseRecording
+        The preprocessed recording object.
+    recording_type : type
+        The type of recording to find.
+
+    Returns
+    -------
+    BaseRecording | None
+        The recording of the specified type if found, otherwise None.
+    """
+    if isinstance(recording, recording_type):
+        return recording
+    elif recording.get_parent() is not None:
+        return find_recording_of_type(recording.get_parent(), recording_type)
+    return None
+
+
 ### METRICS GENERATION FUNCTIONS ###
 def plot_raw_data(
     recording: si.BaseRecording,
@@ -706,6 +729,7 @@ def generate_event_qc(
     recording: si.BaseRecording,
     recording_name: str,
     output_qc_path: Path,
+    recording_preprocessed: si.BaseRecording | None = None,
     relative_to: Path | None = None,
     event_dict: dict | None = None,
     event_keys: list[str] = ["licktime", "optogeneticstime"],
@@ -729,62 +753,99 @@ def generate_event_qc(
 
     logging.info("Generating SATURATION metric")
 
-    probes_info = recording.get_annotation("probes_info")
-    if probes_info is None:
-        saturation_threshold_uv = None
-    else:
-        part_number = recording.get_annotation("probes_info")[0].get("part_number")
-        saturation_threshold_uv = saturation_thresholds_uv.get(part_number)
-
     metrics = []
-    if saturation_threshold_uv is None:
-        logging.info(
-            f"\tSaturation threshold for {recording_name} not available. "
-            "Cannot generate saturation metrics."
-        )
-    else:
-        pos_evts, neg_evts = find_saturation_events(recording, saturation_threshold_uv, **job_kwargs)
+    # Check if saturation events are already available in the preprocessed recording
+    recording_saturation = None
+    pos_evts, neg_evts = [], []
+    signed = True
+    if recording_preprocessed is not None:
+        from spikeinterface.preprocessing.detect_artifacts import DetectAndRemoveArtifactsRecording
 
-        if len(pos_evts) > 0:
+        recording_saturation = find_recording_of_type(recording_preprocessed, DetectAndRemoveArtifactsRecording)
+    if recording_saturation is not None and recording_saturation._kwargs["method"] == "saturation":
+        logging.info(f"\tSaturation events already detected in preprocessed recording.")
+        periods = recording_saturation.periods
+        if "sign" in periods.dtype.names:
+            pos_evts = periods[periods["sign"] == "positive"]
+            neg_evts = periods[periods["sign"] == "negative"]
+        else:
+            # sign is not available (e.g., dropped on JSON reload): plot events as unsigned
+            # (stored in pos_evts to reuse the plotting code)
+            signed = False
+            pos_evts = periods
+    else:
+        # No preprocessed recording, or another artifact detection method was used, not "saturation"
+        recording_saturation = None
+
+    if recording_saturation is None:
+        if "saturation_threshold_uV" in recording.get_annotation_keys():
+            saturation_threshold_uv = recording.get_annotation("saturation_threshold_uV")
+        else:
+            part_number = recording.get_annotation("probes_info")[0].get("part_number")
+            saturation_threshold_uv = saturation_thresholds_uv.get(part_number)
+
+        if saturation_threshold_uv is None:
+            logging.info(
+                f"\tSaturation threshold for {recording_name} not available. "
+                "Cannot generate saturation metrics."
+            )
+        else:
+            periods = spre.detect_saturation_periods(
+                recording, saturation_threshold_uV=saturation_threshold_uv, signed=True, job_kwargs=job_kwargs
+            )
+            pos_evts = periods[periods["sign"] == "positive"]
+            neg_evts = periods[periods["sign"] == "negative"]
+
+    if len(pos_evts) > 0 or len(neg_evts) > 0:
+        if not signed:
+            logging.info(f"\tFound {len(pos_evts)} unsigned saturation events!")
+        elif len(pos_evts) > 0:
             logging.info(f"\tFound {len(pos_evts)} positive saturation events!")
         else:
             logging.info("\tNo positive saturation events found")
         if len(neg_evts) > 0:
             logging.info(f"\tFound {len(neg_evts)} negative saturation events!")
-        else:
+        elif signed:
             logging.info("\tNo negative saturation events found")
 
         # saturation events timeline
         fig_sat_time, ax_sat_time = plt.subplots(figsize=(15, 10))
         ax_sat_time.ticklabel_format(useOffset=False, style='plain', axis='x')
 
-        ax_sat_time.set_title(
-            f"Saturation events:\nPositive: {len(pos_evts)} -- Negative: {len(neg_evts)}"
-        )
+        if signed:
+            title = f"Saturation events:\nPositive: {len(pos_evts)} -- Negative: {len(neg_evts)}"
+        else:
+            title = f"Saturation periods (unsigned): {len(pos_evts)}"
+        ax_sat_time.set_title(title)
         # To avoid loading all timestamps in memory, we lazily load the timestamps one by one
         if len(pos_evts) > 0:
             pos_evt_times = []
             for evt in pos_evts:
                 segment_index = evt["segment_index"]
-                sample_index = evt["sample_index"]
-                t_start = recording.get_start_time(segment_index=segment_index)
+                sample_index = evt["start_sample_index"]
                 evt_time = recording.get_times(segment_index=segment_index, start_frame=sample_index, end_frame=sample_index+1)[0]
-                pos_evt_times.append(evt_time + t_start)
-            ax_sat_time.plot(pos_evt_times, np.ones_like(pos_evt_times), ls="", marker="|", markersize=20, color="r", label="positive")
+                pos_evt_times.append(evt_time)
+            if signed:
+                ax_sat_time.plot(pos_evt_times, np.ones_like(pos_evt_times), ls="", marker="|", markersize=20, color="r", label="positive")
+            else:
+                ax_sat_time.plot(pos_evt_times, np.zeros_like(pos_evt_times), ls="", marker="|", markersize=20, color="k", label="unsigned")
         if len(neg_evts) > 0:
             neg_evt_times = []
             for evt in neg_evts:
                 segment_index = evt["segment_index"]
-                sample_index = evt["sample_index"]
-                t_start = recording.get_start_time(segment_index=segment_index)
+                sample_index = evt["start_sample_index"]
                 evt_time = recording.get_times(segment_index=segment_index, start_frame=sample_index, end_frame=sample_index+1)[0]
-                neg_evt_times.append(evt_time + t_start)
+                neg_evt_times.append(evt_time)
             ax_sat_time.plot(neg_evt_times, -np.ones_like(neg_evt_times), ls="", marker="|", markersize=20, color="b", label="negative")
         ax_sat_time.legend()
         ax_sat_time.set_xlabel("Time (s)")
         ax_sat_time.set_ylabel("Sign")
-        ax_sat_time.set_yticks([-1, +1])
-        ax_sat_time.set_yticklabels(["-", "+"])
+        if signed:
+            ax_sat_time.set_yticks([-1, +1])
+            ax_sat_time.set_yticklabels(["-", "+"])
+        else:
+            ax_sat_time.set_yticks([0])
+            ax_sat_time.set_yticklabels(["unsigned"])
         ax_sat_time.set_ylim(-2, 2)
         ax_sat_time.spines[["top", "right"]].set_visible(False)
         ax_sat_time.get_xaxis().get_major_formatter().set_scientific(False)
@@ -823,7 +884,6 @@ def generate_event_qc(
                 "probe": recording_name_abbrv
             }
         )
-
         metrics.append(saturation_timeline_metric)
 
     if event_dict is not None:
@@ -1530,73 +1590,3 @@ saturation_thresholds_uv = {
     "NP1300": 0.6 / 500 * 1e6,  # Opto probe
 }
 
-
-def find_saturation_events(
-    recording: si.BaseRecording,
-    saturation_threshold_uv: float,
-    exclude_sweep_ms: float = 1,
-    radius_um: float = 200,
-    **job_kwargs,
-):
-    """
-    Find saturation events in a recording.
-
-    Parameters
-    ----------
-    recording : BaseRecording
-        The recording object.
-    saturation_threshold_uv : float
-        The saturation threshold in microvolts.
-    exclude_sweep_ms : float, default: 1
-        The time in milliseconds to exclude around the saturation event.
-    radius_um : float, default: 200
-        The radius in micrometers to consider for saturation events.
-    job_kwargs : dict
-        The job kwargs.
-
-    Returns
-    -------
-    positive_saturation_events : np.ndarray
-        The positive saturation events.
-    negative_saturation_events : np.ndarray
-        The negative saturation events.
-    """
-    # TODO: use preprocessing saturation
-    from spikeinterface.core.node_pipeline import run_node_pipeline
-    from spikeinterface.sortingcomponents.peak_detection.method_list import LocallyExclusivePeakDetector
-
-    channel_distance = si.get_channel_distances(recording)
-    neighbours_mask = channel_distance <= radius_um
-    num_channels = recording.get_num_channels()
-
-    # here we set absolute thresholds externally, since we know the saturation thresholds
-    saturation_both = LocallyExclusivePeakDetector(
-        recording, noise_levels=np.ones(num_channels), peak_sign="both", exclude_sweep_ms=exclude_sweep_ms
-    )
-    gain = recording.get_channel_gains()[0]
-    abs_thresholds = np.array([saturation_threshold_uv / gain] * num_channels)
-    saturation_both.abs_thresholds = abs_thresholds
-
-    job_name = f"finding saturation events"
-    squeeze_output = True
-    nodes = [saturation_both]
-
-    outs = run_node_pipeline(
-        recording,
-        nodes,
-        job_kwargs,
-        job_name=job_name,
-        squeeze_output=squeeze_output,
-    )
-
-    # only keep unique saturation events
-    # sample indices restart at each segment, so uniqueness is on the (segment, sample) pair
-    _, unique_indices = np.unique(
-        np.stack([outs["segment_index"], outs["sample_index"]]), axis=1, return_index=True
-    )
-    outs = outs[np.sort(unique_indices)]
-
-    positive_saturation_events = outs[outs["amplitude"] > 0]
-    negative_saturation_events = outs[outs["amplitude"] < 0]
-
-    return positive_saturation_events, negative_saturation_events
