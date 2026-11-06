@@ -17,7 +17,6 @@ from scipy.signal import welch, savgol_filter
 import spikeinterface as si
 import spikeinterface.preprocessing as spre
 import spikeinterface.widgets as sw
-import probeinterface as pi
 
 from aind_data_schema_models.modalities import Modality
 
