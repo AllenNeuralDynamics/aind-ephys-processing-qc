@@ -15,10 +15,9 @@ from matplotlib.lines import Line2D
 from scipy.signal import welch, savgol_filter
 
 import spikeinterface as si
-from spikeinterface.core.core_tools import check_json
 import spikeinterface.preprocessing as spre
-from spikeinterface.curation import validate_curation_dict
 import spikeinterface.widgets as sw
+import probeinterface as pi
 
 from aind_data_schema_models.modalities import Modality
 
@@ -779,19 +778,33 @@ def generate_event_qc(
 
     if recording_saturation is None:
         if "saturation_threshold_uV" in recording.get_annotation_keys():
-            saturation_threshold_uv = recording.get_annotation("saturation_threshold_uV")
+            logging.info(f"\tUsing saturation threshold from recording annotation.")
+            saturation_threshold_uV = recording.get_annotation("saturation_threshold_uV")
         else:
-            part_number = recording.get_annotation("probes_info")[0].get("part_number")
-            saturation_threshold_uv = saturation_thresholds_uv.get(part_number)
+            probe = recording.get_probegroup().probes[0]
+            saturation_threshold_uV = None
+            # Use probeinterface_library to lookup the saturation threshold for the probe part number
+            try:
+                from probeinterface.neuropixels_tools import build_neuropixels_probe
+                probe_from_catalogue = build_neuropixels_probe(probe.model_name)
+                saturation_threshold_uV = compute_saturation_threshold_from_probe(probe_from_catalogue, stream_name="ap")
+                if saturation_threshold_uV is not None:
+                    logging.info(f"\tUsing saturation threshold from probe catalogue.")
+            except Exception as e:
+                pass
+            if saturation_threshold_uV is None:
+                # Last resort, use internal lookup table
+                logging.info(f"\tUsing saturation threshold from internal lookup table.")
+                saturation_threshold_uV = saturation_thresholds_uv.get(probe.model_name)
 
-        if saturation_threshold_uv is None:
+        if saturation_threshold_uV is None:
             logging.info(
                 f"\tSaturation threshold for {recording_name} not available. "
                 "Cannot generate saturation metrics."
             )
         else:
             periods = spre.detect_saturation_periods(
-                recording, saturation_threshold_uV=saturation_threshold_uv, signed=True, job_kwargs=job_kwargs
+                recording, saturation_threshold_uV=saturation_threshold_uV, signed=True, job_kwargs=job_kwargs
             )
             pos_evts = periods[periods["sign"] == "positive"]
             neg_evts = periods[periods["sign"] == "negative"]
