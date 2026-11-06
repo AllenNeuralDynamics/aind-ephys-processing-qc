@@ -342,7 +342,8 @@ def generate_raw_qc(
     recording_preprocessed: si.BaseRecording | None = None,
     processing: Processing | None = None,
     visualization_output: dict | None = None,
-    allow_failed_metrics: bool = False
+    allow_failed_metrics: bool = False,
+    channel_labels: np.ndarray | None = None,
 ) -> dict[str : list[QCMetric]]:
     """
     Generate raw data quality control metrics for a given recording.
@@ -365,6 +366,8 @@ def generate_raw_qc(
         The processing metadata object.
     visualization_output : dict | None, default: None
         The visualization output dict.
+    channel_labels : np.ndarray | None, default: None
+        The channel labels from preprocessing. If given, `processing` is not used for them.
 
     Returns
     -------
@@ -379,8 +382,7 @@ def generate_raw_qc(
     status_pass = QCStatus(evaluator="", status=Status.PASS, timestamp=now)
     recording_name_abbrv = recording_abbrv_name(recording_name)
 
-    channel_labels = None
-    if processing is not None:
+    if channel_labels is None and processing is not None:
         try:
             data_processes = processing.data_processes
             for data_process in data_processes:
