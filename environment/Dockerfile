@@ -17,5 +17,5 @@ RUN pip install -U --no-cache-dir \
     log-schema==0.2.10.dev1 \
     matplotlib-venn==1.1.2 \
     s3fs==2025.5.1 \
-    spikeinterface[full,widgets]==0.105.3 \
+    spikeinterface[full,widgets]==0.105.4 \
     wavpack-numcodecs==0.2.2
