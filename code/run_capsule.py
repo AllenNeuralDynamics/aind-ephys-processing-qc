@@ -105,7 +105,7 @@ def run() -> None:
     ]
     # per-stream mode: inputs are one stream's step outputs (preprocessed_*, postprocessed_*, ...),
     # not the results collector layout
-    per_stream = any(data_folder.glob("preprocessed_*.json"))
+    per_stream = any(data_folder.glob("preprocessed_*.json")) or any(data_folder.glob("postprocessed_*.zarr"))
     # TODO: fix this!
     if per_stream:
         ecephys_sorted_folder = data_folder
@@ -189,36 +189,45 @@ def run() -> None:
     if event_dict is None:
         logging.info("Events from HARP not found. Trigger event metrics will not be generated.")
 
-    # look for JSON files or loop through preprocessed
-    recording_names = [jd["recording_name"] for jd in job_dicts]
+    # per stream, the recording is the one of its JSON job file (raw evaluations need its recording_dict),
+    # or, without one (e.g. curation pipeline), the one of its analyzer (processed evaluations only)
+    if per_stream:
+        if len(job_dicts) == 0:
+            analyzer_folders = list(data_folder.glob("postprocessed_*.zarr"))
+            assert len(analyzer_folders) == 1, f"Expected one postprocessed analyzer, found {len(analyzer_folders)}"
+            job_dicts = [{"recording_name": analyzer_folders[0].name[len("postprocessed_"):-len(".zarr")]}]
+            logging.info("No JSON job file: skipping raw evaluations")
+        assert len(job_dicts) == 1, f"Expected one JSON job file per stream, found {len(job_dicts)}"
+
     for job_dict in job_dicts:
         all_metrics = []
         recording_name = job_dict["recording_name"]
-        recording = si.load(job_dict["recording_dict"], base_folder=data_folder)
+        recording = None
+        recording_lfp = None
         skip_times = job_dict.get("skip_times", False)
-        if skip_times:
-            logging.info(f"Resetting times for {recording_name}")
-            recording.reset_times()
-        if recording.get_dtype().kind == "u":
-            logging.info(
-                f"Recording has unsigned integer dtype {recording.get_dtype()}. "
-                "Converting to signed integer."
-            )
-            recording = spre.unsigned_to_signed(recording)
-        recording_lfp_dict = job_dict.get("recording_lfp_dict")
-        if recording_lfp_dict is not None:
-            recording_lfp = si.load(recording_lfp_dict, base_folder=data_folder)
+        if "recording_dict" in job_dict:
+            recording = si.load(job_dict["recording_dict"], base_folder=data_folder)
             if skip_times:
-                recording_lfp.reset_times()
-            if recording_lfp.get_dtype().kind == "u":
+                logging.info(f"Resetting times for {recording_name}")
+                recording.reset_times()
+            if recording.get_dtype().kind == "u":
                 logging.info(
-                    f"Recording LFP has unsigned integer dtype {recording_lfp.get_dtype()}. "
+                    f"Recording has unsigned integer dtype {recording.get_dtype()}. "
                     "Converting to signed integer."
                 )
-                recording_lfp = spre.unsigned_to_signed(recording_lfp)
-        else:
-            recording_lfp = None
-        session_name = job_dict["session_name"]
+                recording = spre.unsigned_to_signed(recording)
+            recording_lfp_dict = job_dict.get("recording_lfp_dict")
+            if recording_lfp_dict is not None:
+                recording_lfp = si.load(recording_lfp_dict, base_folder=data_folder)
+                if skip_times:
+                    recording_lfp.reset_times()
+                if recording_lfp.get_dtype().kind == "u":
+                    logging.info(
+                        f"Recording LFP has unsigned integer dtype {recording_lfp.get_dtype()}. "
+                        "Converting to signed integer."
+                    )
+                    recording_lfp = spre.unsigned_to_signed(recording_lfp)
+        session_name = job_dict.get("session_name")
         logging.info(f"Recording {recording_name}")
         recording_preprocessed = None
         if per_stream:
@@ -236,12 +245,14 @@ def run() -> None:
             motion_sorter_path = ecephys_sorted_folder / "spikesorted" / "motion" / recording_name
             curation_json_file = ecephys_sorted_folder / "curated" / recording_name / "curation.json"
         if ecephys_sorted_folder is not None:
-            base_folder = data_folder if PIPELINE_DATA_PATH is None else PIPELINE_DATA_PATH
-            recording_preprocessed = load_preprocessed_recording(
-                preprocessed_json_file, session_name, ecephys_folder, base_folder
-            )
-            if recording_preprocessed is not None and skip_times:
-                recording_preprocessed.reset_times()
+            # the preprocessed recording is built on the raw data
+            if recording is not None:
+                base_folder = data_folder if PIPELINE_DATA_PATH is None else PIPELINE_DATA_PATH
+                recording_preprocessed = load_preprocessed_recording(
+                    preprocessed_json_file, session_name, ecephys_folder, base_folder
+                )
+                if recording_preprocessed is not None and skip_times:
+                    recording_preprocessed.reset_times()
 
             sorting_analyzer = None
             if postprocessed_folder_zarr.is_dir():
@@ -253,20 +264,23 @@ def run() -> None:
                 sorting_analyzer.set_temporary_recording(recording_preprocessed)
 
         quality_control_fig_folder = results_folder / f"quality_control_{recording_name}"
-        
-        metrics_raw = generate_raw_qc(
-            recording,
-            recording_name,
-            quality_control_fig_folder,
-            relative_to=results_folder,
-            recording_lfp=recording_lfp,
-            processing=processing,
-            visualization_output=visualization_output,
-            channel_labels=channel_labels_by_recording.get(recording_name),
-        )
-        all_metrics.extend(metrics_raw)
 
-        if COMPUTE_EVENT_METRIC:
+        if recording is None:
+            logging.info(f"\tNo raw recording for {recording_name}: skipping raw, event and drift metrics")
+        else:
+            metrics_raw = generate_raw_qc(
+                recording,
+                recording_name,
+                quality_control_fig_folder,
+                relative_to=results_folder,
+                recording_lfp=recording_lfp,
+                processing=processing,
+                visualization_output=visualization_output,
+                channel_labels=channel_labels_by_recording.get(recording_name),
+            )
+            all_metrics.extend(metrics_raw)
+
+        if recording is not None and COMPUTE_EVENT_METRIC:
             metrics_event = generate_event_qc(
                 recording,
                 recording_name,
@@ -277,10 +291,10 @@ def run() -> None:
                 event_keys=["licktime", "optogeneticstime"],
             )
             all_metrics.extend(metrics_event)
-        else:
+        elif recording is not None:
             logging.info("Skipping computation of event metrics.")
-        
-        if ecephys_sorted_folder is not None:
+
+        if ecephys_sorted_folder is not None and recording is not None:
             # open displacement arrays
             if not motion_path.is_dir():
                 logging.info(f"\tMotion not found for {recording_name}")
@@ -329,7 +343,8 @@ def run() -> None:
                 logging.info(f"\tQuality/Template metrics not found for {recording_name}. Skipping unit metrics.")
 
         # If recording is too short, allow tagged metrics to fail
-        if recording.get_total_duration() < MIN_DURATION_ALLOW_FAILED:
+        duration = recording.get_total_duration() if recording is not None else sorting_analyzer.get_total_duration()
+        if duration < MIN_DURATION_ALLOW_FAILED:
             logging.info(
                 f"Recording {recording_name} duration below {MIN_DURATION_ALLOW_FAILED}. "
                 f"Adding it to allow_tag_failures."
