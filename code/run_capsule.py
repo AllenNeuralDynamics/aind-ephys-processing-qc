@@ -43,6 +43,7 @@ def run() -> None:
     with open(PARAMS_FILE, "r") as f:
         full_params = json.load(f)
     qc_params = full_params.get("quality_control", {})
+    streaming = full_params["job_dispatch"].get("streaming", False)
     logging_params = full_params.get("logging", None)
 
     COMPUTE_EVENT_METRIC = qc_params.get("compute_event_metrics", True)
@@ -335,6 +336,7 @@ def run() -> None:
                     relative_to=results_folder,
                     raw_recording=recording,
                     curation_json_file=curation_json_file,
+                    add_recording_path_to_link=not streaming
                 )
                 all_metrics.extend(unit_metrics)
                 all_metrics.extend(firing_rate_metrics)
