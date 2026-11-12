@@ -1400,6 +1400,7 @@ def generate_curation_qc(
     relative_to: Path | None = None,
     raw_recording: si.BaseRecording | None = None,
     curation_json_file: Path | None = None,
+    add_recording_path_to_link: bool = True,
 ) -> list[QCMetric]:
     """
     Generate automatic curation summary metric (Venn diagram + label counts + merge
@@ -1533,13 +1534,12 @@ def generate_curation_qc(
     logging.info("Generating SORTING CURATION metric")
     curation_link = "https://ephys.allenneuraldynamics.org/ephys_gui_app?analyzer_path={derived_asset_location}/postprocessed/"
     curation_link += f"{recording_name}.zarr"
-    if raw_recording is not None:
+    if raw_recording is not None and add_recording_path_to_link:
         # figure out whether ecephys_compressed or ecephys/ecephys_compressed #TODO
         recording_relative_path = get_recording_relative_path(raw_recording)
         if recording_relative_path is not None:
             curation_link += "&recording_path={raw_asset_location}/"
             curation_link += recording_relative_path
-
     curation_link_url = quote(curation_link)
 
     if curation_dict is not None:
