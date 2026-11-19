@@ -238,6 +238,7 @@ def run() -> None:
             motion_path = data_folder / f"motion_{recording_name}"
             motion_sorter_path = data_folder / f"spikesortedmotion_{recording_name}"
             curation_json_file = data_folder / f"curation_{recording_name}.json"
+            unit_labels_file = data_folder / f"unit_labels_{recording_name}.csv"
         elif ecephys_sorted_folder is not None:
             preprocessed_json_file = ecephys_sorted_folder / "preprocessed" / f"{recording_name}.json"
             postprocessed_folder_zarr = ecephys_sorted_folder / "postprocessed" / f"{recording_name}.zarr"
@@ -245,6 +246,8 @@ def run() -> None:
             motion_path = ecephys_sorted_folder / "preprocessed" / "motion" / recording_name
             motion_sorter_path = ecephys_sorted_folder / "spikesorted" / "motion" / recording_name
             curation_json_file = ecephys_sorted_folder / "curated" / recording_name / "curation.json"
+            # collected results: labels are already sorting properties of the analyzer
+            unit_labels_file = None
         if ecephys_sorted_folder is not None:
             # the preprocessed recording is built on the raw data
             if recording is not None:
@@ -336,7 +339,8 @@ def run() -> None:
                     relative_to=results_folder,
                     raw_recording=recording,
                     curation_json_file=curation_json_file,
-                    add_recording_path_to_link=not streaming
+                    add_recording_path_to_link=not streaming,
+                    unit_labels_file=unit_labels_file if unit_labels_file is not None and unit_labels_file.is_file() else None,
                 )
                 all_metrics.extend(unit_metrics)
                 all_metrics.extend(firing_rate_metrics)
