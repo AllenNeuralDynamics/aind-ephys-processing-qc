@@ -1401,10 +1401,14 @@ def generate_curation_qc(
     raw_recording: si.BaseRecording | None = None,
     curation_json_file: Path | None = None,
     add_recording_path_to_link: bool = True,
+    unit_labels_file: Path | None = None,
 ) -> list[QCMetric]:
     """
     Generate automatic curation summary metric (Venn diagram + label counts + merge
     summary) and the manual sorting curation metric (link to AIND ephys GUI).
+
+    Unit labels are read from `unit_labels_file` (the curation step's CSV) if given, since in the
+    pipeline QC runs before the results collector adds them to the analyzer as sorting properties.
     """
     from matplotlib_venn import venn2, venn3
 
@@ -1426,10 +1430,14 @@ def generate_curation_qc(
         logging.info(f"\tNo sorting analyzer found for {recording_name}")
     else:
         sorting = sorting_analyzer.sorting
-        property_keys = sorting.get_property_keys()
-        default_qc = sorting.get_property("default_qc") if "default_qc" in property_keys else None
-        unitrefine_label = sorting.get_property("unitrefine_label") if "unitrefine_label" in property_keys else None
-        bombcell_label = sorting.get_property("bombcell_label") if "bombcell_label" in property_keys else None
+        if unit_labels_file is not None:
+            unit_labels_df = pd.read_csv(unit_labels_file, index_col=False)
+            labels = {key: unit_labels_df[key].to_numpy() for key in unit_labels_df.columns}
+        else:
+            labels = {key: sorting.get_property(key) for key in sorting.get_property_keys()}
+        default_qc = labels.get("default_qc")
+        unitrefine_label = labels.get("unitrefine_label")
+        bombcell_label = labels.get("bombcell_label")
 
         n_total = sorting_analyzer.get_num_units()
         unit_indices = np.arange(n_total)
